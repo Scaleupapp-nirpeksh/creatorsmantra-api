@@ -12,48 +12,13 @@
 ├── server.js
 ├── src
 │   ├── app.js
-│   ├── config
-│   │   ├── constants.js
-│   │   ├── database.js
-│   │   ├── environment.js
-│   │   ├── logger.js
-│   │   └── redis.js
-│   ├── controllers
-│   │   ├── agency.controller.js
-│   │   ├── analytics.controller.js
-│   │   ├── auth.controller.js
-│   │   ├── brief.controller.js
-│   │   ├── contract.controller.js
-│   │   ├── creator.controller.js
-│   │   ├── deal.controller.js
-│   │   ├── invoice.controller.js
-│   │   ├── notification.controller.js
-│   │   ├── payment.controller.js
-│   │   ├── performance.controller.js
-│   │   └── rateCard.controller.js
-│   ├── jobs
-│   │   ├── cleanup.job.js
-│   │   ├── payment.reminder.job.js
-│   │   └── report.generation.job.js
-│   ├── middlewares
+│   ├── middlewares(not used)
 │   │   ├── auth.middleware.js
 │   │   ├── error.middleware.js
 │   │   ├── rateLimit.middleware.js
 │   │   ├── rbac.middleware.js
 │   │   ├── security.middleware.js
 │   │   └── validate.middleware.js
-│   ├── models
-│   │   ├── Agency.model.js
-│   │   ├── Brief.model.js
-│   │   ├── Contract.model.js
-│   │   ├── Creator.model.js
-│   │   ├── Deal.model.js
-│   │   ├── Invoice.model.js
-│   │   ├── Notification.model.js
-│   │   ├── Payment.model.js
-│   │   ├── Performance.model.js
-│   │   ├── RateCard.model.js
-│   │   └── User.model.js
 │   ├── modules
 │   │   ├── agency
 │   │   ├── auth
@@ -64,48 +29,6 @@
 │   │   ├── performance
 │   │   ├── ratecards
 │   │   └── subscriptions
-│   ├── routes
-│   │   ├── v1
-│   │   │   ├── agency.routes.js
-│   │   │   ├── analytics.routes.js
-│   │   │   ├── auth.routes.js
-│   │   │   ├── brief.routes.js
-│   │   │   ├── contract.routes.js
-│   │   │   ├── creator.routes.js
-│   │   │   ├── deal.routes.js
-│   │   │   ├── index.js
-│   │   │   ├── invoice.routes.js
-│   │   │   ├── payment.routes.js
-│   │   │   ├── performance.routes.js
-│   │   │   └── rateCard.routes.js
-│   │   └── webhooks
-│   │       ├── email.webhook.js
-│   │       └── razorpay.webhook.js
-│   ├── services
-│   │   ├── ai
-│   │   │   ├── brief.ai.service.js
-│   │   │   ├── contract.ai.service.js
-│   │   │   ├── invoice.ai.service.js
-│   │   │   ├── openai.service.js
-│   │   │   ├── pitch.ai.service.js
-│   │   │   ├── pricing.ai.service.js
-│   │   │   └── report.ai.service.js
-│   │   ├── auth.service.js
-│   │   ├── cache.service.js
-│   │   ├── deal.service.js
-│   │   ├── email
-│   │   │   └── email.service.js
-│   │   ├── payment
-│   │   │   ├── payment.service.js
-│   │   │   └── razorpay.service.js
-│   │   ├── pdf
-│   │   │   ├── invoice.pdf.service.js
-│   │   │   ├── rateCard.pdf.service.js
-│   │   │   └── report.pdf.service.js
-│   │   ├── storage
-│   │   │   ├── s3.service.js
-│   │   │   └── upload.service.js
-│   │   └── webhook.service.js
 │   ├── shared
 │   │   ├── config
 │   │   │   ├── database.js
@@ -133,7 +56,7 @@
 │   │   │       ├── paymentTracker.js
 │   │   │       └── razorpay.js
 │   │   └── utils.js
-│   └── utils
+│   └── utils(not used)
 │       ├── currency.util.js
 │       ├── date.util.js
 │       ├── encryption.util.js
@@ -147,4 +70,4 @@
     ├── integration
     └── unit
 
-41 directories, 107 files
+28 directories, 43 files

@@ -1,11 +1,14 @@
 .
+├── docs
 ├── LICENSE
-├── logs
 ├── nodemon.json
 ├── package-lock.json
 ├── package.json
 ├── project-structure.txt
 ├── README.md
+├── scripts
+│   ├── install-dependencies.js
+│   └── validate-setup.js
 ├── server.js
 ├── src
 │   ├── app.js
@@ -51,6 +54,16 @@
 │   │   ├── Performance.model.js
 │   │   ├── RateCard.model.js
 │   │   └── User.model.js
+│   ├── modules
+│   │   ├── agency
+│   │   ├── auth
+│   │   ├── briefs
+│   │   ├── contracts
+│   │   ├── deals
+│   │   ├── invoices
+│   │   ├── performance
+│   │   ├── ratecards
+│   │   └── subscriptions
 │   ├── routes
 │   │   ├── v1
 │   │   │   ├── agency.routes.js
@@ -81,8 +94,7 @@
 │   │   ├── cache.service.js
 │   │   ├── deal.service.js
 │   │   ├── email
-│   │   │   ├── email.service.js
-│   │   │   └── templates
+│   │   │   └── email.service.js
 │   │   ├── payment
 │   │   │   ├── payment.service.js
 │   │   │   └── razorpay.service.js
@@ -94,6 +106,33 @@
 │   │   │   ├── s3.service.js
 │   │   │   └── upload.service.js
 │   │   └── webhook.service.js
+│   ├── shared
+│   │   ├── config
+│   │   │   ├── database.js
+│   │   │   └── index.js
+│   │   ├── middleware
+│   │   ├── middleware.js
+│   │   ├── services
+│   │   │   ├── ai
+│   │   │   │   ├── briefAnalyzer.js
+│   │   │   │   ├── contractAnalyzer.js
+│   │   │   │   ├── openai.js
+│   │   │   │   ├── performanceWriter.js
+│   │   │   │   ├── pitchGenerator.js
+│   │   │   │   └── priceCalculator.js
+│   │   │   ├── email
+│   │   │   │   ├── emailService.js
+│   │   │   │   ├── notifications.js
+│   │   │   │   └── templates.js
+│   │   │   ├── file
+│   │   │   │   ├── imageProcessor.js
+│   │   │   │   ├── pdfGenerator.js
+│   │   │   │   └── s3Upload.js
+│   │   │   └── payment
+│   │   │       ├── invoiceService.js
+│   │   │       ├── paymentTracker.js
+│   │   │       └── razorpay.js
+│   │   └── utils.js
 │   └── utils
 │       ├── currency.util.js
 │       ├── date.util.js
@@ -102,12 +141,10 @@
 │       ├── sanitize.util.js
 │       ├── token.util.js
 │       └── validation.util.js
-├── tests
-│   ├── fixtures
-│   │   └── test.data.js
-│   ├── integration
-│   └── unit
-└── uploads
-    └── temp
+└── tests
+    ├── fixtures
+    │   └── test.data.js
+    ├── integration
+    └── unit
 
-25 directories, 86 files
+41 directories, 107 files

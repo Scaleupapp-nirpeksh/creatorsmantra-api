@@ -1,3 +1,4 @@
+// src/app.js
 /**
  * CreatorsMantra Backend - Main Application
  * Express.js application setup with middleware and routes
@@ -19,7 +20,7 @@ const {
   errorHandler,
   notFoundHandler
 } = require('./shared/middleware');
-const { log, successResponse } = require('./shared/utils');
+const { logInfo, logWarn, logError, successResponse } = require('./shared/utils');
 
 // ============================================
 // CREATE EXPRESS APPLICATION
@@ -33,6 +34,7 @@ const app = express();
 
 if (config.server.environment === 'production') {
   app.set('trust proxy', 1);
+  logInfo('Trust proxy enabled for production environment');
 }
 
 // ============================================
@@ -45,15 +47,19 @@ app.use(securityMiddleware);
 // CORS configuration
 app.use(corsMiddleware);
 
+logInfo('Security and CORS middleware loaded');
+
 // ============================================
 // REQUEST PARSING MIDDLEWARE
 // ============================================
 
-// JSON body parser
+// JSON body parser with size limit
 app.use(jsonParser);
 
 // URL encoded parser
 app.use(urlencodedParser);
+
+logInfo('Request parsing middleware loaded');
 
 // ============================================
 // LOGGING MIDDLEWARE
@@ -62,6 +68,7 @@ app.use(urlencodedParser);
 // Request logging (only in development and staging)
 if (config.server.environment !== 'production') {
   app.use(requestLogger);
+  logInfo('Request logging enabled for development environment');
 }
 
 // ============================================
@@ -70,6 +77,14 @@ if (config.server.environment !== 'production') {
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// Serve public files if they exist
+try {
+  app.use('/public', express.static(path.join(__dirname, '../public')));
+  logInfo('Static file serving enabled');
+} catch (error) {
+  logWarn('Public directory not found - static file serving disabled');
+}
 
 // ============================================
 // HEALTH CHECK ROUTES
@@ -84,7 +99,13 @@ app.get('/health', (req, res) => {
       timestamp: new Date().toISOString(),
       environment: config.server.environment,
       version: process.env.npm_package_version || '1.0.0',
-      uptime: process.uptime()
+      uptime: Math.floor(process.uptime()),
+      node_version: process.version,
+      platform: process.platform,
+      memory: {
+        used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
+        total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
+      }
     })
   );
 });
@@ -103,16 +124,30 @@ app.get('/health/detailed', async (req, res) => {
         timestamp: new Date().toISOString(),
         environment: config.server.environment,
         version: process.env.npm_package_version || '1.0.0',
-        uptime: process.uptime(),
+        uptime: Math.floor(process.uptime()),
+        node_version: process.version,
+        platform: process.platform,
         memory: process.memoryUsage(),
         cpu: process.cpuUsage()
       },
       database: dbHealth,
       features: {
-        aiEnabled: config.featureFlags.aiFeatures,
-        paymentsEnabled: config.featureFlags.paymentIntegration,
-        emailEnabled: config.featureFlags.emailNotifications,
-        fileUploadEnabled: config.featureFlags.fileUpload
+        aiEnabled: config.featureFlags?.aiFeatures || false,
+        paymentsEnabled: config.featureFlags?.paymentIntegration || false,
+        emailEnabled: config.featureFlags?.emailNotifications || false,
+        fileUploadEnabled: config.featureFlags?.fileUpload || false,
+        smsEnabled: config.featureFlags?.smsNotifications || false
+      },
+      modules: {
+        auth: checkModuleExists('auth'),
+        subscriptions: checkModuleExists('subscriptions'),
+        deals: checkModuleExists('deals'),
+        invoices: checkModuleExists('invoices'),
+        ratecards: checkModuleExists('ratecards'),
+        briefs: checkModuleExists('briefs'),
+        performance: checkModuleExists('performance'),
+        contracts: checkModuleExists('contracts'),
+        agency: checkModuleExists('agency')
       }
     };
     
@@ -122,14 +157,28 @@ app.get('/health/detailed', async (req, res) => {
       successResponse('Detailed health check', healthStatus, statusCode)
     );
   } catch (error) {
+    logError('Health check failed', { error: error.message });
     res.status(503).json({
       success: false,
       message: 'Health check failed',
       error: error.message,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      code: 503
     });
   }
 });
+
+/**
+ * Check if a module exists
+ */
+function checkModuleExists(moduleName) {
+  try {
+    require(`./modules/${moduleName}/routes`);
+    return { status: 'loaded', available: true };
+  } catch (error) {
+    return { status: 'not_found', available: false };
+  }
+}
 
 // ============================================
 // API ROUTES SETUP
@@ -138,7 +187,7 @@ app.get('/health/detailed', async (req, res) => {
 /**
  * API version prefix
  */
-const API_PREFIX = `/api/${config.server.apiVersion}`;
+const API_PREFIX = `/api/${config.server.apiVersion || 'v1'}`;
 
 /**
  * Welcome endpoint
@@ -146,8 +195,11 @@ const API_PREFIX = `/api/${config.server.apiVersion}`;
 app.get(API_PREFIX, (req, res) => {
   res.json(
     successResponse('Welcome to CreatorsMantra API', {
-      version: config.server.apiVersion,
+      version: config.server.apiVersion || 'v1',
+      environment: config.server.environment,
+      timestamp: new Date().toISOString(),
       documentation: `${req.protocol}://${req.get('host')}${API_PREFIX}/docs`,
+      health: `${req.protocol}://${req.get('host')}/health`,
       endpoints: {
         auth: `${API_PREFIX}/auth`,
         deals: `${API_PREFIX}/deals`,
@@ -158,6 +210,16 @@ app.get(API_PREFIX, (req, res) => {
         contracts: `${API_PREFIX}/contracts`,
         subscriptions: `${API_PREFIX}/subscriptions`,
         agency: `${API_PREFIX}/agency`
+      },
+      features: {
+        quarterlyBilling: true,
+        manualPaymentVerification: true,
+        dealPipelineManagement: true,
+        brandProfileManagement: true,
+        communicationTracking: true,
+        indianCompliance: true,
+        gstCalculation: true,
+        tdsHandling: true
       }
     })
   );
@@ -172,102 +234,254 @@ app.get(API_PREFIX, (req, res) => {
  * Each module exports its routes which will be mounted at the appropriate path
  */
 
+let loadedModules = 0;
+let totalModules = 9;
+
 // Authentication routes
 try {
   const authRoutes = require('./modules/auth/routes');
   app.use(`${API_PREFIX}/auth`, authRoutes);
-  log('info', 'Auth routes loaded successfully');
+  logInfo('✅ Auth routes loaded successfully');
+  loadedModules++;
 } catch (error) {
-  log('warn', 'Auth routes not found - module may not be implemented yet');
-}
-
-// Deal CRM routes
-try {
-  const dealRoutes = require('./modules/deals/routes');
-  app.use(`${API_PREFIX}/deals`, dealRoutes);
-  log('info', 'Deal routes loaded successfully');
-} catch (error) {
-  log('warn', 'Deal routes not found - module may not be implemented yet');
-}
-
-// Invoice routes
-try {
-  const invoiceRoutes = require('./modules/invoices/routes');
-  app.use(`${API_PREFIX}/invoices`, invoiceRoutes);
-  log('info', 'Invoice routes loaded successfully');
-} catch (error) {
-  log('warn', 'Invoice routes not found - module may not be implemented yet');
-}
-
-// Rate card routes
-try {
-  const rateCardRoutes = require('./modules/ratecards/routes');
-  app.use(`${API_PREFIX}/ratecards`, rateCardRoutes);
-  log('info', 'Rate card routes loaded successfully');
-} catch (error) {
-  log('warn', 'Rate card routes not found - module may not be implemented yet');
-}
-
-// Brief analyzer routes
-try {
-  const briefRoutes = require('./modules/briefs/routes');
-  app.use(`${API_PREFIX}/briefs`, briefRoutes);
-  log('info', 'Brief routes loaded successfully');
-} catch (error) {
-  log('warn', 'Brief routes not found - module may not be implemented yet');
-}
-
-// Performance vault routes
-try {
-  const performanceRoutes = require('./modules/performance/routes');
-  app.use(`${API_PREFIX}/performance`, performanceRoutes);
-  log('info', 'Performance routes loaded successfully');
-} catch (error) {
-  log('warn', 'Performance routes not found - module may not be implemented yet');
-}
-
-// Contract routes
-try {
-  const contractRoutes = require('./modules/contracts/routes');
-  app.use(`${API_PREFIX}/contracts`, contractRoutes);
-  log('info', 'Contract routes loaded successfully');
-} catch (error) {
-  log('warn', 'Contract routes not found - module may not be implemented yet');
+  logWarn('⚠️  Auth routes not found - module may not be implemented yet', { error: error.message });
 }
 
 // Subscription routes
 try {
   const subscriptionRoutes = require('./modules/subscriptions/routes');
   app.use(`${API_PREFIX}/subscriptions`, subscriptionRoutes);
-  log('info', 'Subscription routes loaded successfully');
+  logInfo('✅ Subscription routes loaded successfully');
+  loadedModules++;
 } catch (error) {
-  log('warn', 'Subscription routes not found - module may not be implemented yet');
+  logWarn('⚠️  Subscription routes not found - module may not be implemented yet', { error: error.message });
+}
+
+// Deal CRM routes
+try {
+  const dealRoutes = require('./modules/deals/routes');
+  app.use(`${API_PREFIX}/deals`, dealRoutes);
+  logInfo('✅ Deal routes loaded successfully');
+  loadedModules++;
+} catch (error) {
+  logWarn('⚠️  Deal routes not found - module may not be implemented yet', { error: error.message });
+}
+
+// Invoice routes
+try {
+  const invoiceRoutes = require('./modules/invoices/routes');
+  app.use(`${API_PREFIX}/invoices`, invoiceRoutes);
+  logInfo('✅ Invoice routes loaded successfully');
+  loadedModules++;
+} catch (error) {
+  logWarn('⚠️  Invoice routes not found - module may not be implemented yet', { error: error.message });
+}
+
+// Rate card routes
+try {
+  const rateCardRoutes = require('./modules/ratecards/routes');
+  app.use(`${API_PREFIX}/ratecards`, rateCardRoutes);
+  logInfo('✅ Rate card routes loaded successfully');
+  loadedModules++;
+} catch (error) {
+  logWarn('⚠️  Rate card routes not found - module may not be implemented yet', { error: error.message });
+}
+
+// Brief analyzer routes
+try {
+  const briefRoutes = require('./modules/briefs/routes');
+  app.use(`${API_PREFIX}/briefs`, briefRoutes);
+  logInfo('✅ Brief routes loaded successfully');
+  loadedModules++;
+} catch (error) {
+  logWarn('⚠️  Brief routes not found - module may not be implemented yet', { error: error.message });
+}
+
+// Performance vault routes
+try {
+  const performanceRoutes = require('./modules/performance/routes');
+  app.use(`${API_PREFIX}/performance`, performanceRoutes);
+  logInfo('✅ Performance routes loaded successfully');
+  loadedModules++;
+} catch (error) {
+  logWarn('⚠️  Performance routes not found - module may not be implemented yet', { error: error.message });
+}
+
+// Contract routes
+try {
+  const contractRoutes = require('./modules/contracts/routes');
+  app.use(`${API_PREFIX}/contracts`, contractRoutes);
+  logInfo('✅ Contract routes loaded successfully');
+  loadedModules++;
+} catch (error) {
+  logWarn('⚠️  Contract routes not found - module may not be implemented yet', { error: error.message });
 }
 
 // Agency routes
 try {
   const agencyRoutes = require('./modules/agency/routes');
   app.use(`${API_PREFIX}/agency`, agencyRoutes);
-  log('info', 'Agency routes loaded successfully');
+  logInfo('✅ Agency routes loaded successfully');
+  loadedModules++;
 } catch (error) {
-  log('warn', 'Agency routes not found - module may not be implemented yet');
+  logWarn('⚠️  Agency routes not found - module may not be implemented yet', { error: error.message });
 }
 
 // ============================================
-// API DOCUMENTATION (PLACEHOLDER)
+// UTILITY ROUTES
+// ============================================
+
+/**
+ * Get API status and loaded modules
+ */
+app.get(`${API_PREFIX}/status`, (req, res) => {
+  res.json(
+    successResponse('API Status', {
+      status: 'operational',
+      modulesLoaded: loadedModules,
+      totalModules: totalModules,
+      completionPercentage: Math.round((loadedModules / totalModules) * 100),
+      loadedModulesList: getLoadedModules(),
+      environment: config.server.environment,
+      timestamp: new Date().toISOString()
+    })
+  );
+});
+
+/**
+ * Get loaded modules list
+ */
+function getLoadedModules() {
+  const modules = ['auth', 'subscriptions', 'deals', 'invoices', 'ratecards', 'briefs', 'performance', 'contracts', 'agency'];
+  return modules.filter(module => {
+    try {
+      require(`./modules/${module}/routes`);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * API version information
+ */
+app.get(`${API_PREFIX}/version`, (req, res) => {
+  res.json(
+    successResponse('API Version Information', {
+      api_version: config.server.apiVersion || 'v1',
+      app_version: process.env.npm_package_version || '1.0.0',
+      node_version: process.version,
+      environment: config.server.environment,
+      build_date: new Date().toISOString(),
+      supported_features: [
+        'user_authentication',
+        'subscription_management',
+        'deal_pipeline',
+        'brand_profiles',
+        'payment_verification',
+        'quarterly_billing',
+        'indian_compliance',
+        'gst_calculation',
+        'communication_tracking'
+      ]
+    })
+  );
+});
+
+// ============================================
+// API DOCUMENTATION
 // ============================================
 
 /**
  * API documentation endpoint
- * TODO: Implement Swagger/OpenAPI documentation
  */
 app.get(`${API_PREFIX}/docs`, (req, res) => {
   res.json(
     successResponse('API Documentation', {
-      message: 'API documentation will be available here',
-      swagger: 'Coming soon',
-      postman: 'Collection available on request',
-      contact: 'support@creatorsmantra.com'
+      message: 'CreatorsMantra API Documentation',
+      version: config.server.apiVersion || 'v1',
+      base_url: `${req.protocol}://${req.get('host')}${API_PREFIX}`,
+      authentication: {
+        type: 'Bearer Token (JWT)',
+        header: 'Authorization: Bearer <token>',
+        endpoints: {
+          register: `${API_PREFIX}/auth/register`,
+          login: `${API_PREFIX}/auth/login`,
+          verify_otp: `${API_PREFIX}/auth/verify-otp`
+        }
+      },
+      modules: {
+        auth: {
+          description: 'User authentication and profile management',
+          base_path: `${API_PREFIX}/auth`,
+          features: ['registration', 'login', 'otp_verification', 'profile_management']
+        },
+        subscriptions: {
+          description: 'Subscription and billing management',
+          base_path: `${API_PREFIX}/subscriptions`,
+          features: ['payment_verification', 'billing_cycles', 'upgrades', 'quarterly_billing']
+        },
+        deals: {
+          description: 'Deal pipeline and CRM management',
+          base_path: `${API_PREFIX}/deals`,
+          features: ['deal_creation', 'pipeline_management', 'brand_profiles', 'communications']
+        }
+      },
+      rate_limits: {
+        general: '100 requests per 15 minutes',
+        authentication: '10 requests per 15 minutes',
+        payment_verification: '5 requests per 15 minutes'
+      },
+      support: {
+        email: 'support@creatorsmantra.com',
+        documentation: 'Coming soon',
+        postman_collection: 'Available on request'
+      }
+    })
+  );
+});
+
+/**
+ * Postman collection endpoint
+ */
+app.get(`${API_PREFIX}/postman`, (req, res) => {
+  res.json(
+    successResponse('Postman Collection', {
+      message: 'Postman collection for CreatorsMantra API',
+      download_url: 'Coming soon',
+      description: 'Complete API collection with examples and tests',
+      contact: 'support@creatorsmantra.com for early access'
+    })
+  );
+});
+
+// ============================================
+// FEATURE FLAGS ENDPOINT
+// ============================================
+
+/**
+ * Get current feature flags
+ */
+app.get(`${API_PREFIX}/features`, (req, res) => {
+  res.json(
+    successResponse('Feature Flags', {
+      features: {
+        ai_features: config.featureFlags?.aiFeatures || false,
+        payment_integration: config.featureFlags?.paymentIntegration || false,
+        email_notifications: config.featureFlags?.emailNotifications || false,
+        sms_notifications: config.featureFlags?.smsNotifications || false,
+        file_upload: config.featureFlags?.fileUpload || false,
+        quarterly_billing: true,
+        manual_payment_verification: true,
+        indian_compliance: true,
+        gst_calculation: true,
+        tds_handling: true,
+        brand_profiles: true,
+        deal_templates: true,
+        communication_tracking: true
+      },
+      environment: config.server.environment
     })
   );
 });
@@ -292,18 +506,24 @@ app.use(errorHandler);
  */
 const initializeApp = async () => {
   try {
-    log('info', 'Initializing CreatorsMantra Backend Application');
+    logInfo('🚀 Initializing CreatorsMantra Backend Application');
     
     // Initialize database connection
+    logInfo('📊 Connecting to MongoDB database...');
     await initializeDatabase();
+    logInfo('✅ Database connection established');
     
     // Initialize external services if needed
+    logInfo('🔧 Initializing external services...');
     await initializeServices();
     
-    log('info', 'Application initialized successfully');
+    // Log module status
+    logInfo(`📦 Loaded ${loadedModules}/${totalModules} modules (${Math.round((loadedModules/totalModules)*100)}% complete)`);
+    
+    logInfo('✅ Application initialized successfully');
     return true;
   } catch (error) {
-    log('error', 'Application initialization failed', { error: error.message });
+    logError('❌ Application initialization failed', { error: error.message, stack: error.stack });
     throw error;
   }
 };
@@ -313,29 +533,52 @@ const initializeApp = async () => {
  */
 const initializeServices = async () => {
   try {
+    let servicesInitialized = 0;
+    
     // Initialize AWS S3 if configured
-    if (config.aws.accessKeyId && config.featureFlags.fileUpload) {
-      log('info', 'AWS S3 configuration detected');
+    if (config.aws?.accessKeyId && config.featureFlags?.fileUpload) {
+      logInfo('☁️  AWS S3 configuration detected and enabled');
+      servicesInitialized++;
+    } else {
+      logWarn('⚠️  AWS S3 not configured - file upload disabled');
     }
     
     // Initialize OpenAI if configured
-    if (config.openai.apiKey && config.featureFlags.aiFeatures) {
-      log('info', 'OpenAI API configuration detected');
+    if (config.openai?.apiKey && config.featureFlags?.aiFeatures) {
+      logInfo('🤖 OpenAI API configuration detected and enabled');
+      servicesInitialized++;
+    } else {
+      logWarn('⚠️  OpenAI API not configured - AI features disabled');
     }
     
     // Initialize Razorpay if configured
-    if (config.payment.razorpay.keyId && config.featureFlags.paymentIntegration) {
-      log('info', 'Razorpay payment configuration detected');
+    if (config.payment?.razorpay?.keyId && config.featureFlags?.paymentIntegration) {
+      logInfo('💳 Razorpay payment configuration detected and enabled');
+      servicesInitialized++;
+    } else {
+      logWarn('⚠️  Razorpay not configured - using manual payment verification');
     }
     
     // Initialize email service if configured
-    if (config.email.smtp.auth.user && config.featureFlags.emailNotifications) {
-      log('info', 'Email service configuration detected');
+    if (config.email?.smtp?.auth?.user && config.featureFlags?.emailNotifications) {
+      logInfo('📧 Email service configuration detected and enabled');
+      servicesInitialized++;
+    } else {
+      logWarn('⚠️  Email service not configured - email notifications disabled');
     }
     
+    // Initialize Twilio if configured
+    if (config.twilio?.accountSid && config.featureFlags?.smsNotifications) {
+      logInfo('📱 Twilio SMS configuration detected and enabled');
+      servicesInitialized++;
+    } else {
+      logWarn('⚠️  Twilio not configured - SMS notifications disabled');
+    }
+    
+    logInfo(`🔧 Initialized ${servicesInitialized} external services`);
     return true;
   } catch (error) {
-    log('warn', 'Some services could not be initialized', { error: error.message });
+    logWarn('⚠️  Some services could not be initialized', { error: error.message });
     // Don't throw error for service initialization failures
     return false;
   }
@@ -349,16 +592,38 @@ const initializeServices = async () => {
  * Graceful shutdown handling
  */
 const gracefulShutdown = (signal) => {
-  log('info', `${signal} received. Starting graceful shutdown...`);
+  logInfo(`🛑 ${signal} received. Starting graceful shutdown...`);
   
-  // Close server and database connections
-  // This will be handled by the server.js file
-  process.exit(0);
+  // Close database connections
+  const { closeDatabase } = require('./shared/config/database');
+  closeDatabase()
+    .then(() => {
+      logInfo('✅ Database connections closed');
+    })
+    .catch((error) => {
+      logError('❌ Error closing database connections', { error: error.message });
+    })
+    .finally(() => {
+      logInfo('👋 Graceful shutdown completed');
+      process.exit(0);
+    });
 };
 
 // Handle shutdown signals
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  logError('❌ Uncaught Exception', { error: error.message, stack: error.stack });
+  gracefulShutdown('UNCAUGHT_EXCEPTION');
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  logError('❌ Unhandled Promise Rejection', { reason, promise });
+  gracefulShutdown('UNHANDLED_REJECTION');
+});
 
 // ============================================
 // EXPORTS
@@ -367,3 +632,4 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // Export the app and initialization function
 module.exports = app;
 module.exports.initializeApp = initializeApp;
+module.exports.gracefulShutdown = gracefulShutdown;

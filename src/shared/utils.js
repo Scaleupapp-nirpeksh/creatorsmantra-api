@@ -1,4 +1,4 @@
-//src/shared/utils.js
+// src/shared/utils.js
 /**
  * CreatorsMantra Backend - Shared Utilities
  * Single utility file containing all helper functions
@@ -524,11 +524,12 @@ const formatFileSize = (bytes) => {
  * @param {string} code - Error code
  * @returns {Error} Standardized error
  */
-const createError = (message, statusCode = 500, code = 'INTERNAL_ERROR') => {
-  const error = new Error(message);
-  error.statusCode = statusCode;
-  error.code = code;
-  return error;
+const createError = (message, status = 500, code = 'INTERNAL_ERROR') => {
+  const err = new Error(message);
+  err.status = status;         // many middlewares expect this
+  err.statusCode = status;     // some of your services use this
+  err.code = code;
+  return err;
 };
 
 /**
@@ -554,15 +555,16 @@ const asyncHandler = (fn) => {
  */
 const log = (level, message, meta = {}) => {
   const timestamp = formatToIST();
-  const logEntry = {
-    timestamp,
-    level: level.toUpperCase(),
-    message,
-    ...meta
-  };
-  
-  console.log(JSON.stringify(logEntry, null, 2));
+  const entry = { timestamp, level: level.toUpperCase(), message };
+  if (meta && Object.keys(meta).length) entry.meta = meta;
+  if (level === 'error') console.error(JSON.stringify(entry));
+  else if (level === 'warn') console.warn(JSON.stringify(entry));
+  else console.log(JSON.stringify(entry));
 };
+
+const logInfo  = (msg, meta) => log('info', msg, meta);
+const logWarn  = (msg, meta) => log('warn', msg, meta);
+const logError = (msg, meta) => log('error', msg, meta);
 
 // ============================================
 // EXPORTS
@@ -630,5 +632,8 @@ module.exports = {
   asyncHandler,
   
   // Logger
-  log
+  log,
+  logInfo,
+  logWarn,
+  logError
 };

@@ -26,7 +26,7 @@ const connectionOptions = {
   family: 4, // Use IPv4, skip trying IPv6
   
   // Buffer settings
-  bufferMaxEntries: 0, // Disable mongoose buffering
+
   bufferCommands: false, // Disable mongoose buffering
   
   // Retry settings
@@ -202,6 +202,19 @@ const createIndexes = async () => {
   }
 };
 
+
+/**
+ * Close database connection
+ */
+const closeDatabase = async () => {
+  try {
+    await mongoose.connection.close();
+    console.log('Database connection closed');
+  } catch (error) {
+    console.error('Error closing database:', error);
+    throw error;
+  }
+};
 // ============================================
 // EXPORTS
 // ============================================
@@ -211,5 +224,6 @@ module.exports = {
   setupDatabaseEvents,
   getDatabaseHealth,
   initializeDatabase,
-  createIndexes
+  createIndexes,
+  closeDatabase
 };

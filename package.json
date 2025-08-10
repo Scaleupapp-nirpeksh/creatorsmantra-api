@@ -41,7 +41,8 @@
     "puppeteer": "^21.0.3",
     "qrcode": "^1.5.4",
     "razorpay": "^2.9.2",
-    "winston": "^3.10.0"
+    "winston": "^3.10.0",
+     "axios": "^1.6.0"
   },
   "devDependencies": {
     "eslint": "^8.47.0",

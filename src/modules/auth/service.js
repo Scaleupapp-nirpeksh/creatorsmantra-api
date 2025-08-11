@@ -18,6 +18,7 @@ const {
   successResponse,
   errorResponse
 } = require('../../shared/utils');
+const nodemailer = require('nodemailer');
 
 class AuthService {
   constructor() {
@@ -941,49 +942,286 @@ async sendOTPSMS(phone, otpCode, purpose) {
     }
   }
 
+
   /**
-   * Send manager invitation email
-   * @param {Object} managerData - Manager data
-   * @param {Object} creatorProfile - Creator profile
-   */
-  async sendManagerInvitationEmail(managerData, creatorProfile) {
-    try {
-      // Skip email in development/test environment
-      if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
-        log('info', 'Manager invitation email skipped in development', { 
-          managerEmail: managerData.managerEmail 
-        });
-        return;
-      }
+ * Create email transporter
+ * @returns {object} Nodemailer transporter
+ */
+createEmailTransporter() {
+  return nodemailer.createTransport({
+    host: process.env.EMAIL_HOST,
+    port: parseInt(process.env.EMAIL_PORT),
+    secure: process.env.EMAIL_SECURE === 'true', // true for 465, false for other ports
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    },
+    tls: {
+      rejectUnauthorized: false // Allow self-signed certificates
+    }
+  });
+}
 
-      const emailService = require('../../shared/services/email/emailService');
-      const creator = await User.findById(creatorProfile.userId);
-      
-      await emailService.sendEmail({
-        to: managerData.managerEmail,
-        subject: `${creator.fullName} invited you to manage their CreatorsMantra account`,
-        template: 'manager_invitation',
-        data: {
-          managerName: managerData.managerName,
-          creatorName: creator.fullName,
-          relationship: managerData.relationship,
-          acceptUrl: `${process.env.FRONTEND_URL}/manager/accept-invitation?email=${managerData.managerEmail}`
-        }
-      });
+/**
+ * Send email using nodemailer
+ * @param {Object} emailOptions - Email options
+ */
+async sendEmail(emailOptions) {
+  try {
+   
 
-      log('info', 'Manager invitation email sent', { 
-        managerEmail: managerData.managerEmail,
-        creatorId: creatorProfile.userId 
-      });
+    // Check if email configuration is available
+    if (!process.env.EMAIL_HOST || !process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.log('⚠️  Email configuration missing, skipping email send');
+      log('info', 'Email skipped due to missing configuration', { to: emailOptions.to });
+      return;
+    }
 
-    } catch (error) {
-      log('error', 'Manager invitation email failed', { 
-        managerEmail: managerData.managerEmail,
-        error: error.message 
-      });
-      // Don't throw error for email failures
+    const transporter = this.createEmailTransporter();
+    
+    const mailOptions = {
+      from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+      to: emailOptions.to,
+      subject: emailOptions.subject,
+      html: emailOptions.html || emailOptions.body,
+      text: emailOptions.text
+    };
+
+    const result = await transporter.sendMail(mailOptions);
+    log('info', 'Email sent successfully', { 
+      to: emailOptions.to, 
+      subject: emailOptions.subject,
+      messageId: result.messageId 
+    });
+
+    return result;
+
+  } catch (error) {
+    log('error', 'Email sending failed', { 
+      to: emailOptions.to,
+      error: error.message 
+    });
+    throw error;
+  }
+}
+
+ /**
+ * Send manager invitation email
+ * @param {Object} managerData - Manager data
+ * @param {Object} creatorProfile - Creator profile
+ */
+async sendManagerInvitationEmail(managerData, creatorProfile) {
+  try {
+    const creator = await User.findById(creatorProfile.userId);
+    
+    const emailHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+          .button { background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0; }
+          .footer { text-align: center; margin-top: 30px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🚀 CreatorsMantra Invitation</h1>
+          </div>
+          <div class="content">
+            <h2>Hi ${managerData.managerName}!</h2>
+            <p><strong>${creator.fullName}</strong> has invited you to manage their CreatorsMantra account as a <strong>${managerData.relationship.replace('_', ' ')}</strong>.</p>
+            
+            <p>As a manager, you'll be able to:</p>
+            <ul>
+              <li>✅ View and manage deals</li>
+              <li>✅ Create and send invoices</li>
+              <li>✅ Communicate with brands</li>
+              <li>✅ Access performance analytics</li>
+            </ul>
+            
+            <div style="text-align: center;">
+              <a href="${process.env.FRONTEND_URL}/manager/accept-invitation?email=${encodeURIComponent(managerData.managerEmail)}" class="button">
+                Accept Invitation
+              </a>
+            </div>
+            
+            <p><strong>What's Next?</strong></p>
+            <ol>
+              <li>Click the "Accept Invitation" button above</li>
+              <li>Create your manager account</li>
+              <li>Start managing ${creator.fullName}'s collaborations</li>
+            </ol>
+            
+            <p>This invitation will expire in 7 days.</p>
+            
+            <p>If you have any questions, feel free to contact ${creator.fullName} directly or reach out to our support team.</p>
+            
+            <p>Best regards,<br>The CreatorsMantra Team</p>
+          </div>
+          <div class="footer">
+            <p>© 2025 CreatorsMantra. All rights reserved.</p>
+            <p>If you didn't expect this invitation, you can safely ignore this email.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    await this.sendEmail({
+      to: managerData.managerEmail,
+      subject: `${creator.fullName} invited you to manage their CreatorsMantra account`,
+      html: emailHTML,
+      text: `Hi ${managerData.managerName}! ${creator.fullName} has invited you to manage their CreatorsMantra account. Accept the invitation at: ${process.env.FRONTEND_URL}/manager/accept-invitation?email=${managerData.managerEmail}`
+    });
+
+    log('info', 'Manager invitation email sent', { 
+      managerEmail: managerData.managerEmail,
+      creatorId: creatorProfile.userId 
+    });
+
+  } catch (error) {
+    log('error', 'Manager invitation email failed', { 
+      managerEmail: managerData.managerEmail,
+      error: error.message 
+    });
+    // Don't throw error for email failures during development
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Email error in development mode, continuing...');
     }
   }
+}
+
+/**
+ * Send welcome email to new user
+ * @param {Object} user - User object
+ * @param {Object} creatorProfile - Creator profile object
+ */
+async sendWelcomeEmail(user, creatorProfile) {
+  try {
+    const emailHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+          .button { background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0; }
+          .trial-box { background: #e8f5e8; border: 2px solid #4caf50; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🎉 Welcome to CreatorsMantra!</h1>
+          </div>
+          <div class="content">
+            <h2>Hi ${user.fullName}!</h2>
+            <p>Welcome to CreatorsMantra - the ultimate platform for content creators to manage their brand collaborations!</p>
+            
+            <div class="trial-box">
+              <h3>🚀 Your ${user.subscriptionTier.toUpperCase()} Trial is Active!</h3>
+              <p><strong>Trial ends:</strong> ${formatToIST(user.subscriptionEndDate)}</p>
+              <p>Enjoy full access to all ${user.subscriptionTier} features during your trial period.</p>
+            </div>
+            
+            <h3>What you can do now:</h3>
+            <ul>
+              <li>📊 Set up your creator profile and rate card</li>
+              <li>🤝 Manage brand collaborations</li>
+              <li>💼 Create professional invoices</li>
+              <li>📈 Track your performance analytics</li>
+              <li>👥 Invite managers to help run your business</li>
+            </ul>
+            
+            <div style="text-align: center;">
+              <a href="${process.env.FRONTEND_URL}/dashboard" class="button">
+                Go to Dashboard
+              </a>
+            </div>
+            
+            <p>Need help getting started? Check out our <a href="${process.env.FRONTEND_URL}/help">Help Center</a> or contact our support team.</p>
+            
+            <p>Best regards,<br>The CreatorsMantra Team</p>
+          </div>
+          <div class="footer">
+            <p>© 2025 CreatorsMantra. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    await this.sendEmail({
+      to: user.email,
+      subject: 'Welcome to CreatorsMantra! 🚀',
+      html: emailHTML,
+      text: `Welcome to CreatorsMantra, ${user.fullName}! Your ${user.subscriptionTier} trial is now active. Login at: ${process.env.FRONTEND_URL}/login`
+    });
+
+    log('info', 'Welcome email sent successfully', { userId: user._id });
+
+  } catch (error) {
+    log('error', 'Welcome email failed', { userId: user._id, error: error.message });
+  }
+}
+
+/**
+ * Send password reset confirmation email
+ * @param {Object} user - User object
+ */
+async sendPasswordResetConfirmationEmail(user) {
+  try {
+    const emailHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #4caf50; color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0; }
+          .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🔒 Password Reset Successful</h1>
+          </div>
+          <div class="content">
+            <h2>Hi ${user.fullName}!</h2>
+            <p>Your password has been successfully reset at <strong>${formatToIST(new Date())}</strong>.</p>
+            
+            <p>If you didn't make this change, please contact our support team immediately.</p>
+            
+            <p>You can now login with your new password at: <a href="${process.env.FRONTEND_URL}/login">${process.env.FRONTEND_URL}/login</a></p>
+            
+            <p>Best regards,<br>The CreatorsMantra Team</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    await this.sendEmail({
+      to: user.email,
+      subject: 'Password Reset Successful - CreatorsMantra',
+      html: emailHTML,
+      text: `Hi ${user.fullName}! Your password has been successfully reset. Login at: ${process.env.FRONTEND_URL}/login`
+    });
+
+    log('info', 'Password reset confirmation email sent', { userId: user._id });
+
+  } catch (error) {
+    log('error', 'Password reset confirmation email failed', { userId: user._id, error: error.message });
+  }
+}
 
   /**
    * Refresh JWT tokens

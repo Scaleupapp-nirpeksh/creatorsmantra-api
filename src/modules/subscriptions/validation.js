@@ -15,13 +15,20 @@ const { isValidPhone, isValidEmail } = require('../../shared/utils');
 // PAYMENT VERIFICATION SCHEMAS
 // ============================================
 
+
 const initiatePaymentVerificationSchema = Joi.object({
+  // Make subscriptionId optional
   subscriptionId: Joi.string()
-    .required()
     .pattern(/^[0-9a-fA-F]{24}$/)
     .messages({
-      'string.pattern.base': 'Invalid subscription ID format',
-      'any.required': 'Subscription ID is required'
+      'string.pattern.base': 'Invalid subscription ID format'
+    }),
+
+  // Add subscriptionTier as alternative
+  subscriptionTier: Joi.string()
+    .valid('starter', 'pro', 'elite', 'agency_starter', 'agency_pro')
+    .messages({
+      'any.only': 'Invalid subscription tier'
     }),
 
   paymentAmount: Joi.number()
@@ -139,6 +146,9 @@ const initiatePaymentVerificationSchema = Joi.object({
     fileSize: Joi.number().min(1).max(10 * 1024 * 1024), // Max 10MB
     uploadedAt: Joi.date().default(Date.now)
   }).optional()
+}).or('subscriptionId', 'subscriptionTier') // Require at least one
+.messages({
+  'object.missing': 'Either subscriptionId or subscriptionTier must be provided'
 });
 
 const manualPaymentVerificationSchema = Joi.object({

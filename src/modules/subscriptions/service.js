@@ -28,117 +28,272 @@ class SubscriptionService {
   // PAYMENT VERIFICATION WORKFLOW
   // ============================================
   
-  /**
-   * Initiate payment verification process
-   * @param {Object} paymentData - Payment details including screenshot
-   * @param {String} userId - User ID making the payment
-   * @returns {Object} Payment tracking record
-   */
-  async initiatePaymentVerification(paymentData, userId) {
-    try {
-      const { 
-        subscriptionId,
-        paymentAmount,
-        paymentMethod = 'upi',
-        upiDetails = {},
-        bankDetails = {},
-        paymentScreenshot,
-        ipAddress,
-        userAgent 
-      } = paymentData;
 
-      // Validate user and subscription
-      const user = await User.findById(userId);
-      if (!user) {
-        throw new Error('User not found');
-      }
+/**
+ * Initiate payment verification process
+ * @param {Object} paymentData - Payment details including screenshot
+ * @param {String} userId - User ID making the payment
+ * @returns {Object} Payment tracking record
+ */
+async initiatePaymentVerification(paymentData, userId) {
+  try {
+    const { 
+      subscriptionId,
+      subscriptionTier, // NEW: Allow subscriptionTier as alternative
+      paymentAmount,
+      paymentMethod = 'upi',
+      upiDetails = {},
+      bankDetails = {},
+      paymentScreenshot,
+      ipAddress,
+      userAgent 
+    } = paymentData;
 
-      const subscription = await SubscriptionHistory.findById(subscriptionId);
+    // Validate user and subscription
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    let subscription;
+    
+    // Try to find existing subscription first
+    if (subscriptionId) {
+      subscription = await SubscriptionHistory.findById(subscriptionId);
       if (!subscription) {
         throw new Error('Subscription not found');
       }
-
-      // Get current billing cycle
-      const currentCycle = await BillingCycle.findOne({
-        userId,
-        cycleStatus: { $in: ['upcoming', 'payment_pending'] }
-      }).sort({ cycleNumber: -1 });
-
-      if (!currentCycle) {
-        throw new Error('No active billing cycle found');
-      }
-
-      // Validate payment amount
-      const expectedAmount = currentCycle.totalAmountWithGst;
-      const amountDifference = Math.abs(paymentAmount - expectedAmount);
-      
-      if (amountDifference > 50) { // Allow ₹50 difference for rounding
-        throw new Error(`Payment amount mismatch. Expected: ₹${expectedAmount}, Received: ₹${paymentAmount}`);
-      }
-
-      // Create payment tracking record
-      const paymentTracking = new PaymentTracking({
-        userId,
-        subscriptionId,
-        paymentAmount,
-        originalAmount: expectedAmount,
-        discountAmount: currentCycle.discountAmount,
-        discountType: currentCycle.cycleType === 'quarterly' ? 'quarterly_discount' : 'none',
-        paymentMethod,
-        upiDetails: paymentMethod === 'upi' ? {
-          upiId: upiDetails.upiId,
-          transactionId: upiDetails.transactionId,
-          bankReference: upiDetails.bankReference,
-          senderName: upiDetails.senderName,
-          receiverUpiId: 'creatorsmantra@paytm'
-        } : undefined,
-        bankDetails: paymentMethod === 'bank_transfer' ? bankDetails : undefined,
-        paymentScreenshot: paymentScreenshot,
-        paymentStatus: 'pending',
-        verificationStage: 'screenshot_uploaded',
-        ipAddress,
-        userAgent,
-        priority: amountDifference > 10 ? 'high' : 'medium'
-      });
-
-      // Calculate auto verification score
-      paymentTracking.calculateVerificationScore();
-
-      await paymentTracking.save();
-
-      // Update billing cycle status
-      await BillingCycle.findByIdAndUpdate(currentCycle._id, {
-        cycleStatus: 'payment_pending',
-        paymentStatus: 'processing',
-        paymentReference: paymentTracking._id
-      });
-
-      // Send confirmation SMS/Email
-      await this.sendPaymentConfirmation(user, paymentTracking);
-
-      logInfo('Payment verification initiated', {
-        userId,
-        paymentTrackingId: paymentTracking._id,
-        amount: paymentAmount,
-        method: paymentMethod
-      });
-
-      return successResponse(
-        'Payment submitted for verification',
-        {
-          paymentTrackingId: paymentTracking._id,
-          verificationTimeframe: '24-48 hours',
-          expectedAmount,
-          receivedAmount: paymentAmount,
-          verificationStage: paymentTracking.verificationStage
-        }
-      );
-
-    } catch (error) {
-      logError('Payment verification initiation failed', { userId, error: error.message });
-      throw error;
+    } else if (subscriptionTier) {
+      // NEW: Create subscription if subscriptionTier is provided instead
+      subscription = await this.createQuickSubscription(userId, subscriptionTier, paymentAmount);
+    } else {
+      throw new Error('Either subscriptionId or subscriptionTier must be provided');
     }
+
+    // Get current billing cycle
+    let currentCycle = await BillingCycle.findOne({
+      userId,
+      cycleStatus: { $in: ['upcoming', 'payment_pending'] }
+    }).sort({ cycleNumber: -1 });
+
+    // NEW: Create billing cycle if it doesn't exist
+    if (!currentCycle) {
+      currentCycle = await this.createQuickBillingCycle(userId, subscription);
+    }
+
+    // Validate payment amount
+    const expectedAmount = currentCycle.totalAmountWithGst;
+    const amountDifference = Math.abs(paymentAmount - expectedAmount);
+    
+    if (amountDifference > 50) { // Allow ₹50 difference for rounding
+      throw new Error(`Payment amount mismatch. Expected: ₹${expectedAmount}, Received: ₹${paymentAmount}`);
+    }
+
+    // Create payment tracking record
+    const paymentTracking = new PaymentTracking({
+      userId,
+      subscriptionId: subscription._id,
+      paymentAmount,
+      originalAmount: expectedAmount,
+      discountAmount: currentCycle.discountAmount,
+      discountType: currentCycle.cycleType === 'quarterly' ? 'quarterly_discount' : 'none',
+      paymentMethod,
+      upiDetails: paymentMethod === 'upi' ? {
+        upiId: upiDetails.upiId,
+        transactionId: upiDetails.transactionId,
+        bankReference: upiDetails.bankReference,
+        senderName: upiDetails.senderName,
+        receiverUpiId: 'creatorsmantra@paytm'
+      } : undefined,
+      bankDetails: paymentMethod === 'bank_transfer' ? bankDetails : undefined,
+      paymentScreenshot: paymentScreenshot,
+      paymentStatus: 'pending',
+      verificationStage: 'screenshot_uploaded',
+      ipAddress,
+      userAgent,
+      priority: amountDifference > 10 ? 'high' : 'medium'
+    });
+
+    // Calculate auto verification score
+    paymentTracking.calculateVerificationScore();
+
+    await paymentTracking.save();
+
+    // Update billing cycle status
+    await BillingCycle.findByIdAndUpdate(currentCycle._id, {
+      cycleStatus: 'payment_pending',
+      paymentStatus: 'processing',
+      paymentReference: paymentTracking._id
+    });
+
+    // Send confirmation SMS/Email
+    await this.sendPaymentConfirmation(user, paymentTracking);
+
+    logInfo('Payment verification initiated', {
+      userId,
+      paymentTrackingId: paymentTracking._id,
+      subscriptionId: subscription._id,
+      amount: paymentAmount,
+      method: paymentMethod
+    });
+
+    return successResponse(
+      'Payment submitted for verification',
+      {
+        paymentTrackingId: paymentTracking._id,
+        subscriptionId: subscription._id,
+        verificationTimeframe: '24-48 hours',
+        expectedAmount,
+        receivedAmount: paymentAmount,
+        verificationStage: paymentTracking.verificationStage
+      }
+    );
+
+  } catch (error) {
+    logError('Payment verification initiation failed', { userId, error: error.message });
+    throw error;
   }
+}
+
+// NEW: Add these helper methods to the SubscriptionService class
+
+/**
+ * Create a quick subscription for payment processing
+ * Robust version that tries multiple status values
+ * @param {String} userId - User ID
+ * @param {String} subscriptionTier - Subscription tier
+ * @param {Number} paymentAmount - Payment amount
+ * @returns {Object} Created subscription
+ */
+async createQuickSubscription(userId, subscriptionTier, paymentAmount) {
+  try {
+    const pricing = this.getSubscriptionPricing();
+    const tierPricing = pricing[subscriptionTier];
+    
+    if (!tierPricing) {
+      throw new Error('Invalid subscription tier');
+    }
+
+    // Determine billing cycle based on payment amount
+    const isQuarterly = Math.abs(paymentAmount - tierPricing.quarterly) <= Math.abs(paymentAmount - tierPricing.monthly);
+    const billingCycle = isQuarterly ? 'quarterly' : 'monthly';
+    const duration = isQuarterly ? 90 : 30; // days
+
+    // Try different status values until one works
+    const statusesToTry = ['trial', 'active', 'inactive', 'created', 'pending_verification'];
+    let subscription = null;
+    let lastError = null;
+
+    for (const status of statusesToTry) {
+      try {
+        subscription = new SubscriptionHistory({
+          userId,
+          tier: subscriptionTier, // Model expects 'tier', not 'subscriptionTier'
+          paymentAmount: paymentAmount, // Model expects 'paymentAmount', not 'amount'
+          billingCycle,
+          status: status,
+          paymentStatus: 'pending',
+          startDate: new Date(),
+          endDate: new Date(Date.now() + duration * 24 * 60 * 60 * 1000)
+        });
+
+        await subscription.save();
+        
+        logInfo('Quick subscription created', {
+          userId,
+          subscriptionId: subscription._id,
+          tier: subscriptionTier,
+          billingCycle,
+          statusUsed: status
+        });
+
+        return subscription;
+
+      } catch (err) {
+        lastError = err;
+        // If it's a validation error for status, try the next one
+        if (err.name === 'ValidationError' && err.message.includes('is not a valid enum value for path `status`')) {
+          continue;
+        } else {
+          // If it's a different error, throw it immediately
+          throw err;
+        }
+      }
+    }
+
+    // If we get here, none of the status values worked
+    logError('All status values failed', {
+      userId,
+      subscriptionTier,
+      triedStatuses: statusesToTry,
+      lastError: lastError.message
+    });
+
+    throw new Error(`Could not create subscription. Please check SubscriptionHistory model status enum values. Last error: ${lastError.message}`);
+
+  } catch (error) {
+    // Log detailed validation errors
+    if (error.name === 'ValidationError') {
+      logError('Subscription validation failed', {
+        userId,
+        subscriptionTier,
+        validationErrors: Object.keys(error.errors).map(field => ({
+          field,
+          message: error.errors[field].message,
+          value: error.errors[field].value
+        }))
+      });
+    }
+    throw error;
+  }
+}
+
+/**
+ * Create a quick billing cycle for the subscription
+ * @param {String} userId - User ID
+ * @param {Object} subscription - Subscription object
+ * @returns {Object} Created billing cycle
+ */
+async createQuickBillingCycle(userId, subscription) {
+  try {
+    const baseAmount = subscription.paymentAmount;
+    const discountAmount = subscription.billingCycle === 'quarterly' ? Math.round(baseAmount * 0.10) : 0;
+    const finalAmount = baseAmount - discountAmount;
+    const gstAmount = Math.round(finalAmount * 0.18);
+    const totalAmountWithGst = finalAmount + gstAmount;
+
+    const billingCycle = new BillingCycle({
+      userId,
+      cycleNumber: 1,
+      cycleType: subscription.billingCycle || 'quarterly',
+      subscriptionTier: subscription.tier,
+      cycleStartDate: subscription.startDate,
+      cycleEndDate: subscription.endDate,
+      paymentDueDate: new Date(subscription.endDate.getTime() - 7 * 24 * 60 * 60 * 1000),
+      baseAmount: baseAmount,
+      discountAmount: discountAmount,           // Add this
+      finalAmount: finalAmount,                 // Add this
+      gstAmount: gstAmount,                     // Add this
+      totalAmountWithGst: totalAmountWithGst,   // Add this
+      cycleStatus: 'upcoming',
+      paymentStatus: 'pending'
+    });
+
+    await billingCycle.save();
+
+    logInfo('Quick billing cycle created', {
+      userId,
+      billingCycleId: billingCycle._id,
+      cycleNumber: billingCycle.cycleNumber
+    });
+
+    return billingCycle;
+
+  } catch (error) {
+    logError('Creating quick billing cycle failed', { userId, error: error.message });
+    throw error;
+  }
+}
 
   /**
    * Manual payment verification by admin

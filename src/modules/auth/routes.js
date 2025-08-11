@@ -10,6 +10,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const Joi = require('joi');
 const authService = require('./service');
+const { User, CreatorProfile, SubscriptionHistory } = require('./model');
 const { 
   authenticateUser, 
   validateRequest,

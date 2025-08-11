@@ -137,12 +137,12 @@
     uploadPaymentScreenshot = asyncHandler(async (req, res) => {
         const { paymentId } = req.params;
         const userId = req.user.id;
-
+    
         // Check if file was uploaded
         if (!req.file) {
         return res.status(400).json(errorResponse('Payment screenshot is required', 400));
         }
-
+    
         const PaymentTracking = require('./model').PaymentTracking;
         
         // Find payment record
@@ -151,29 +151,29 @@
         userId,
         paymentStatus: 'pending'
         });
-
+    
         if (!payment) {
         return res.status(404).json(errorResponse('Payment record not found or already processed', 404));
         }
-
-        // Update payment with screenshot details
+    
+        // Update payment with screenshot details (using base64 for memory storage)
         payment.paymentScreenshot = {
-        originalUrl: req.file.location, // S3 URL
+        originalUrl: `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`,
         fileName: req.file.originalname,
         fileSize: req.file.size,
         uploadedAt: new Date()
         };
-
+    
         payment.verificationStage = 'screenshot_uploaded';
         
         // Recalculate verification score
         payment.calculateVerificationScore();
-
+    
         await payment.save();
-
+    
         res.status(200).json(successResponse('Payment screenshot uploaded successfully', {
         paymentId: payment._id,
-        screenshotUrl: payment.paymentScreenshot.originalUrl,
+        screenshotUrl: 'Screenshot uploaded successfully',
         verificationStage: payment.verificationStage,
         autoVerificationScore: payment.autoVerificationScore
         }));

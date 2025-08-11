@@ -676,6 +676,7 @@ paymentTrackingSchema.methods.calculateVerificationScore = function() {
 
 // Virtual: Days since payment
 paymentTrackingSchema.virtual('daysSincePayment').get(function() {
+  if (!this.createdAt) return 0;
   return Math.floor((Date.now() - this.createdAt.getTime()) / (24 * 60 * 60 * 1000));
 });
 
@@ -739,19 +740,21 @@ billingCycleSchema.methods.isOverdue = function() {
 
 // Virtual: Days remaining in cycle
 billingCycleSchema.virtual('daysRemaining').get(function() {
+  if (!this.cycleEndDate) return 0;
   const remaining = Math.ceil((this.cycleEndDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
   return Math.max(0, remaining);
 });
 
 // Virtual: Days until payment due
 billingCycleSchema.virtual('daysUntilDue').get(function() {
+  if (!this.paymentDueDate) return 0;
   const remaining = Math.ceil((this.paymentDueDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
   return remaining;
 });
 
 // Virtual: Grace period days remaining
 billingCycleSchema.virtual('graceDaysRemaining').get(function() {
-  if (!this.isInGracePeriod()) return 0;
+  if (!this.gracePeriodEndDate || !this.isInGracePeriod()) return 0;
   const remaining = Math.ceil((this.gracePeriodEndDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
   return Math.max(0, remaining);
 });

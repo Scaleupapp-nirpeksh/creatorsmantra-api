@@ -91,64 +91,20 @@ const ALLOWED_TIERS = ['starter', 'pro', 'elite', 'agency_starter', 'agency_pro'
 // FILE UPLOAD CONFIGURATION (Conditional)
 // ============================================
 
-let upload;
-
-// Only configure S3 if AWS credentials are available
-if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-  const s3 = new AWS.S3({
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    region: process.env.AWS_REGION || 'ap-south-1'
-  });
-
-  upload = multer({
-    storage: multerS3({
-      s3: s3,
-      bucket: process.env.AWS_S3_BUCKET || 'creatorsmantra-payments',
-      key: function (req, file, cb) {
-        const userId = req.user.id;
-        const timestamp = Date.now();
-        const filename = `payments/${userId}/${timestamp}-${file.originalname}`;
-        cb(null, filename);
-      },
-      contentType: multerS3.AUTO_CONTENT_TYPE,
-      metadata: function (req, file, cb) {
-        cb(null, {
-          userId: req.user.id,
-          uploadedAt: new Date().toISOString(),
-          originalName: file.originalname
-        });
-      }
-    }),
-    limits: {
-      fileSize: 10 * 1024 * 1024,
-      files: 1
-    },
-    fileFilter: function (req, file, cb) {
-      if (file.mimetype.startsWith('image/')) {
-        cb(null, true);
-      } else {
-        cb(new Error('Only image files are allowed'), false);
-      }
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 1
+  },
+  fileFilter: function (req, file, cb) {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
     }
-  });
-} else {
-  // Fallback to memory storage if S3 is not configured
-  upload = multer({
-    storage: multer.memoryStorage(),
-    limits: {
-      fileSize: 10 * 1024 * 1024,
-      files: 1
-    },
-    fileFilter: function (req, file, cb) {
-      if (file.mimetype.startsWith('image/')) {
-        cb(null, true);
-      } else {
-        cb(new Error('Only image files are allowed'), false);
-      }
-    }
-  });
-}
+  }
+});
 
 // ============================================
 // PUBLIC/UTILITY ROUTES (No params, no auth)

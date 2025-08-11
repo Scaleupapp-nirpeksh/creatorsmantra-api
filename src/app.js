@@ -1,7 +1,7 @@
 /**
  * CreatorsMantra Backend - Main Application
  * Express.js application setup with middleware and routes
- * Enhanced with Invoice Module Support & Production Features
+ * Enhanced with Invoice Module Support, Brief Module Support & Production Features
  * 
  * @author CreatorsMantra Team
  * @version 1.0.0
@@ -11,6 +11,7 @@ const express = require('express');
 const path = require('path');
 const cron = require('node-cron');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
 const config = require('./shared/config');
 const { initializeDatabase, getDatabaseHealth, closeDatabase } = require('./shared/config/database');
 const { 
@@ -23,6 +24,7 @@ const {
   notFoundHandler
 } = require('./shared/middleware');
 const { logInfo, logWarn, logError, successResponse } = require('./shared/utils');
+const { rateLimitByTier } = require('./shared/rateLimiter');
 
 // ============================================
 // CREATE EXPRESS APPLICATION
@@ -68,6 +70,9 @@ app.use(urlencodedParser);
 
 logInfo('📝 Request parsing middleware loaded');
 
+// Rate limiting is now available via shared/rateLimiter.js
+logInfo('⚡ Rate limiting by subscription tier configured');
+
 // ============================================
 // FILE UPLOAD MIDDLEWARE FOR INVOICES
 // ============================================
@@ -111,6 +116,35 @@ if (config.server.environment !== 'production') {
   app.use(requestLogger);
   logInfo('📊 Request logging enabled for development environment');
 }
+
+// ============================================
+// API USAGE TRACKING
+// ============================================
+
+/**
+ * Track API usage per subscription tier
+ */
+const trackAPIUsage = async (req, res, next) => {
+  if (req.user) {
+    const originalSend = res.send;
+    
+    res.send = function(data) {
+      // Log API usage for analytics
+      logInfo('API Usage', {
+        userId: req.user.userId,
+        subscriptionTier: req.user.subscriptionTier,
+        endpoint: req.path,
+        method: req.method,
+        statusCode: res.statusCode,
+        timestamp: new Date().toISOString()
+      });
+      
+      originalSend.call(this, data);
+    };
+  }
+  
+  next();
+};
 
 // ============================================
 // STATIC FILES SERVING
@@ -188,7 +222,9 @@ app.get('/health/detailed', async (req, res) => {
         pdfGenerationEnabled: config.featureFlags?.pdfGeneration !== false,
         paymentRemindersEnabled: config.featureFlags?.paymentReminders !== false,
         invoiceConsolidationEnabled: true,
-        taxControlEnabled: true
+        taxControlEnabled: true,
+        briefAnalysisEnabled: true,
+        dealConversionEnabled: true
       },
       modules: {
         auth: checkModuleExists('auth'),
@@ -205,7 +241,9 @@ app.get('/health/detailed', async (req, res) => {
         cronJobs: checkCronJobsStatus(),
         pdfGeneration: checkPDFGenerationService(),
         fileUpload: checkFileUploadService(),
-        paymentReminders: checkPaymentReminderService()
+        paymentReminders: checkPaymentReminderService(),
+        aiProcessing: checkAIProcessingService(),
+        briefAnalysis: checkBriefAnalysisService()
       }
     };
     
@@ -227,11 +265,43 @@ app.get('/health/detailed', async (req, res) => {
 });
 
 /**
- * Enhanced module check function with invoice-specific features
+ * Enhanced module check function with invoice and brief-specific features
  */
 function checkModuleExists(moduleName) {
   try {
     const routes = require(`./modules/${moduleName}/routes`);
+    
+    // Special health check for briefs module
+    if (moduleName === 'briefs') {
+      try {
+        const { Brief } = require(`./modules/${moduleName}/model`);
+        const briefService = require(`./modules/${moduleName}/service`);
+        
+        return { 
+          status: 'loaded', 
+          available: true,
+          features: {
+            models: !!Brief,
+            service: !!briefService,
+            fileUpload: true,
+            aiExtraction: config.featureFlags?.aiFeatures || false,
+            textAnalysis: true,
+            dealConversion: true,
+            clarificationEmail: config.featureFlags?.emailNotifications || false,
+            riskAssessment: config.featureFlags?.aiFeatures || false,
+            pricingSuggestions: config.featureFlags?.aiFeatures || false
+          },
+          version: '1.0.0'
+        };
+      } catch (error) {
+        return { 
+          status: 'partial', 
+          available: true,
+          error: 'Service layer issues',
+          details: error.message
+        };
+      }
+    }
     
     // Special health check for invoice module
     if (moduleName === 'invoices') {
@@ -281,7 +351,9 @@ function checkCronJobsStatus() {
       status: 'operational',
       activeTasks: activeTasks.size,
       paymentReminders: config.featureFlags?.paymentReminders !== false,
-      pdfCleanup: config.featureFlags?.pdfGeneration !== false
+      pdfCleanup: config.featureFlags?.pdfGeneration !== false,
+      briefFileCleanup: true,
+      aiProcessingCleanup: config.featureFlags?.aiFeatures || false
     };
   } catch (error) {
     return {
@@ -317,7 +389,9 @@ function checkFileUploadService() {
     status: 'available',
     maxFileSize: '10MB',
     allowedTypes: ['PDF', 'JPEG', 'PNG', 'JPG', 'WEBP'],
-    storage: config.aws?.accessKeyId ? 'AWS S3' : 'Local'
+    storage: config.aws?.accessKeyId ? 'AWS S3' : 'Local',
+    briefUploads: true,
+    invoiceUploads: true
   };
 }
 
@@ -333,6 +407,38 @@ function checkPaymentReminderService() {
   };
 }
 
+/**
+ * Check AI processing service
+ */
+function checkAIProcessingService() {
+  return {
+    status: config.featureFlags?.aiFeatures ? 'enabled' : 'disabled',
+    provider: 'OpenAI',
+    model: 'gpt-3.5-turbo',
+    available: !!process.env.OPENAI_API_KEY,
+    features: ['brief_extraction', 'risk_assessment', 'pricing_suggestions']
+  };
+}
+
+/**
+ * Check brief analysis service
+ */
+function checkBriefAnalysisService() {
+  return {
+    status: 'enabled',
+    fileTypes: ['PDF', 'DOC', 'DOCX', 'TXT'],
+    maxFileSize: {
+      starter: '5MB',
+      pro: '10MB',
+      elite: '25MB',
+      agency_starter: '25MB',
+      agency_pro: '50MB'
+    },
+    aiEnabled: config.featureFlags?.aiFeatures || false,
+    dealConversion: true
+  };
+}
+
 // ============================================
 // API ROUTES SETUP
 // ============================================
@@ -341,6 +447,9 @@ function checkPaymentReminderService() {
  * API version prefix
  */
 const API_PREFIX = `/api/${config.server.apiVersion || 'v1'}`;
+
+// Apply API usage tracking to all API routes
+app.use(API_PREFIX, trackAPIUsage);
 
 /**
  * Welcome endpoint with enhanced feature information
@@ -380,7 +489,14 @@ app.get(API_PREFIX, (req, res) => {
         agencyPayout: true,
         pdfGeneration: config.featureFlags?.pdfGeneration !== false,
         paymentTracking: true,
-        automatedReminders: config.featureFlags?.paymentReminders !== false
+        automatedReminders: config.featureFlags?.paymentReminders !== false,
+        // Brief analysis features
+        briefAnalysis: true,
+        aiExtraction: config.featureFlags?.aiFeatures || false,
+        fileUploadBriefs: true,
+        dealConversion: true,
+        clarificationManagement: true,
+        riskAssessment: config.featureFlags?.aiFeatures || false
       }
     })
   );
@@ -449,11 +565,12 @@ try {
   logWarn('⚠️  Rate card routes not found - module may not be implemented yet', { error: error.message });
 }
 
-// Brief analyzer routes
+// Brief analyzer routes - ENHANCED WITH AI PROCESSING
 try {
   const briefRoutes = require('./modules/briefs/routes');
   app.use(`${API_PREFIX}/briefs`, briefRoutes);
   logInfo('✅ Brief routes loaded successfully');
+  logInfo('📋 Brief features enabled: AI Extraction, File Upload, Deal Conversion, Risk Assessment');
   loadedModules++;
 } catch (error) {
   logWarn('⚠️  Brief routes not found - module may not be implemented yet', { error: error.message });
@@ -509,6 +626,10 @@ app.get(`${API_PREFIX}/status`, (req, res) => {
       invoiceModule: {
         status: checkModuleExists('invoices').status,
         features: checkModuleExists('invoices').features || {}
+      },
+      briefModule: {
+        status: checkModuleExists('briefs').status,
+        features: checkModuleExists('briefs').features || {}
       }
     })
   );
@@ -557,7 +678,15 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
         'agency_payout',
         'pdf_generation',
         'payment_tracking',
-        'automated_reminders'
+        'automated_reminders',
+        // Brief analysis features
+        'brief_analysis',
+        'ai_extraction',
+        'file_upload_briefs',
+        'deal_conversion',
+        'clarification_management',
+        'risk_assessment',
+        'pricing_suggestions'
       ]
     })
   );
@@ -568,7 +697,7 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
 // ============================================
 
 /**
- * API documentation endpoint with invoice module details
+ * API documentation endpoint with invoice and brief module details
  */
 app.get(`${API_PREFIX}/docs`, (req, res) => {
   res.json(
@@ -625,6 +754,30 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
           consolidation_types: [
             'monthly', 'brand_wise', 'agency_payout', 'date_range', 'custom_selection'
           ]
+        },
+        briefs: {
+          description: 'Brand brief analysis and AI-powered extraction with deal conversion',
+          base_path: `${API_PREFIX}/briefs`,
+          features: [
+            'text_brief_creation',
+            'file_upload_briefs',
+            'ai_extraction',
+            'risk_assessment',
+            'pricing_suggestions',
+            'clarification_management',
+            'deal_conversion',
+            'brand_guidelines_extraction'
+          ],
+          key_endpoints: {
+            create_text: 'POST /briefs/create-text',
+            create_file: 'POST /briefs/create-file',
+            ai_extraction: 'POST /briefs/:id/extract',
+            clarification_email: 'POST /briefs/:id/clarification-email',
+            convert_to_deal: 'POST /briefs/:id/convert-to-deal',
+            dashboard_stats: 'GET /briefs/dashboard/stats'
+          },
+          supported_files: ['PDF', 'DOC', 'DOCX', 'TXT'],
+          ai_features: config.featureFlags?.aiFeatures || false
         }
       },
       rate_limits: {
@@ -632,14 +785,26 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
         authentication: '10 requests per 15 minutes',
         payment_verification: '5 requests per 15 minutes',
         pdf_generation: '10 requests per 15 minutes',
-        file_upload: '20 requests per 15 minutes'
+        file_upload: '20 requests per 15 minutes',
+        brief_creation: 'Tier-based limits (5-200 per hour)',
+        ai_processing: 'Tier-based limits (0-100 per hour)'
       },
       file_upload: {
-        max_size: '10MB',
-        allowed_types: ['PDF', 'JPEG', 'PNG', 'JPG', 'WEBP'],
+        max_size: {
+          starter: '5MB',
+          pro: '10MB',
+          elite: '25MB',
+          agency_starter: '25MB',
+          agency_pro: '50MB'
+        },
+        allowed_types: {
+          invoices: ['PDF', 'JPEG', 'PNG', 'JPG', 'WEBP'],
+          briefs: ['PDF', 'DOC', 'DOCX', 'TXT']
+        },
         endpoints: [
           'POST /invoices/:id/upload-payment-screenshot',
-          'POST /invoices/:id/generate-pdf'
+          'POST /invoices/:id/generate-pdf',
+          'POST /briefs/create-file'
         ]
       },
       support: {
@@ -666,7 +831,10 @@ app.get(`${API_PREFIX}/postman`, (req, res) => {
         'Invoice generation workflows',
         'Consolidated billing examples',
         'Payment tracking examples',
-        'File upload examples'
+        'File upload examples',
+        'Brief analysis workflows',
+        'AI extraction examples',
+        'Deal conversion examples'
       ]
     })
   );
@@ -677,7 +845,7 @@ app.get(`${API_PREFIX}/postman`, (req, res) => {
 // ============================================
 
 /**
- * Get current feature flags with invoice-specific flags
+ * Get current feature flags with invoice and brief-specific flags
  */
 app.get(`${API_PREFIX}/features`, (req, res) => {
   res.json(
@@ -708,9 +876,39 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
         payment_tracking: true,
         invoice_templates: true,
         automated_receipts: true,
-        file_upload_invoices: true
+        file_upload_invoices: true,
+        
+        // Brief module features
+        brief_analysis: true,
+        ai_extraction: config.featureFlags?.aiFeatures || false,
+        file_upload_briefs: true,
+        deal_conversion: true,
+        clarification_management: true,
+        brand_brief_templates: true,
+        risk_assessment: config.featureFlags?.aiFeatures || false,
+        pricing_suggestions: config.featureFlags?.aiFeatures || false,
+        auto_clarification_email: config.featureFlags?.emailNotifications || false
       },
       environment: config.server.environment,
+      brief_features: {
+        supported_file_types: ['PDF', 'DOC', 'DOCX', 'TXT'],
+        max_file_size_by_tier: {
+          starter: '5MB',
+          pro: '10MB',
+          elite: '25MB',
+          agency_starter: '25MB',
+          agency_pro: '50MB'
+        },
+        ai_processing: config.featureFlags?.aiFeatures || false,
+        auto_clarification_email: config.featureFlags?.emailNotifications || false,
+        rate_limits: {
+          starter: '5 briefs/hour',
+          pro: '15 briefs/hour',
+          elite: '50 briefs/hour',
+          agency_starter: '100 briefs/hour',
+          agency_pro: '200 briefs/hour'
+        }
+      },
       invoice_features: {
         consolidation_types: ['monthly', 'brand_wise', 'agency_payout', 'date_range', 'custom_selection'],
         supported_file_types: ['PDF', 'JPEG', 'PNG', 'JPG', 'WEBP'],
@@ -761,6 +959,46 @@ app.use('/api/*/invoices', (error, req, res, next) => {
 });
 
 logInfo('📄 Invoice-specific error handling configured');
+
+// ============================================
+// BRIEF-SPECIFIC ERROR HANDLING
+// ============================================
+
+// Brief file upload error handler
+app.use('/api/*/briefs', (error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      const tier = req.user?.subscriptionTier || 'starter';
+      const limits = {
+        starter: '5MB',
+        pro: '10MB',
+        elite: '25MB',
+        agency_starter: '25MB',
+        agency_pro: '50MB'
+      };
+      
+      return res.status(400).json({
+        success: false,
+        message: `File too large. Maximum size is ${limits[tier]} for ${tier} plan.`,
+        code: 400,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  if (error.message.includes('Invalid file type')) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid file type. Only PDF, DOC, DOCX, and TXT files are allowed.',
+      code: 400,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  next(error);
+});
+
+logInfo('📋 Brief-specific error handling configured');
 
 // ============================================
 // GENERAL ERROR HANDLING MIDDLEWARE
@@ -890,6 +1128,123 @@ const initializeInvoiceServices = async () => {
   }
 };
 
+// ============================================
+// BRIEF SERVICES INITIALIZATION
+// ============================================
+
+/**
+ * Initialize brief-specific services
+ */
+const initializeBriefServices = async () => {
+  try {
+    logInfo('📋 Initializing brief services...');
+    
+    // Initialize brief file cleanup job
+    cron.schedule('0 3 * * 0', async () => {
+      try {
+        logInfo('🗑️  Cleaning up old brief files...');
+        
+        const fs = require('fs').promises;
+        const path = require('path');
+        const briefUploadsDir = path.join(__dirname, '../uploads/briefs');
+        
+        try {
+          const files = await fs.readdir(briefUploadsDir);
+          const now = Date.now();
+          const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
+          
+          let cleanedCount = 0;
+          for (const file of files) {
+            const filePath = path.join(briefUploadsDir, file);
+            const stats = await fs.stat(filePath);
+            
+            if (stats.mtime.getTime() < thirtyDaysAgo) {
+              await fs.unlink(filePath);
+              cleanedCount++;
+            }
+          }
+          
+          logInfo(`✅ Brief file cleanup completed - removed ${cleanedCount} old files`);
+        } catch (error) {
+          logWarn('⚠️  Brief uploads directory not found or cleanup failed', { error: error.message });
+        }
+        
+      } catch (error) {
+        logError('❌ Brief file cleanup failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    // Initialize AI processing queue cleanup
+    if (config.featureFlags?.aiFeatures) {
+      cron.schedule('0 4 * * *', async () => {
+        try {
+          logInfo('🤖 Updating AI processing statuses...');
+          
+          const { Brief } = require('./modules/briefs/model');
+          
+          // Reset stuck processing briefs (processing for more than 1 hour)
+          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+          const result = await Brief.updateMany(
+            {
+              'aiExtraction.status': 'processing',
+              updatedAt: { $lt: oneHourAgo }
+            },
+            {
+              $set: { 'aiExtraction.status': 'failed' }
+            }
+          );
+          
+          logInfo(`✅ AI processing cleanup completed - reset ${result.modifiedCount} stuck processes`);
+          
+        } catch (error) {
+          logError('❌ AI processing cleanup failed', { error: error.message });
+        }
+      }, {
+        timezone: 'Asia/Kolkata'
+      });
+      
+      logInfo('🤖 AI processing cleanup cron job scheduled (daily at 4 AM IST)');
+    }
+    
+    // Initialize brief analytics update job (daily)
+    cron.schedule('0 5 * * *', async () => {
+      try {
+        logInfo('📊 Updating brief analytics...');
+        
+        const { Brief } = require('./modules/briefs/model');
+        
+        // Update brief statuses based on AI extraction completion
+        const result = await Brief.updateMany(
+          {
+            'aiExtraction.status': 'completed',
+            status: 'draft'
+          },
+          {
+            $set: { status: 'analyzed' }
+          }
+        );
+        
+        logInfo(`✅ Brief analytics updated - ${result.modifiedCount} briefs marked as analyzed`);
+        
+      } catch (error) {
+        logError('❌ Brief analytics update failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    logInfo('📋 Brief file cleanup cron job scheduled (weekly)');
+    logInfo('📊 Brief analytics cron job scheduled (daily at 5 AM IST)');
+    
+    return true;
+  } catch (error) {
+    logWarn('⚠️  Brief services initialization partially failed', { error: error.message });
+    return false;
+  }
+};
+
 /**
  * Validate invoice environment and dependencies
  */
@@ -939,12 +1294,67 @@ const validateInvoiceEnvironment = () => {
   return true;
 };
 
+/**
+ * Validate brief environment and dependencies
+ */
+const validateBriefEnvironment = () => {
+  const warnings = [];
+  const errors = [];
+  
+  // Check AI processing requirements
+  if (config.featureFlags?.aiFeatures) {
+    if (!process.env.OPENAI_API_KEY) {
+      errors.push('OpenAI API key not configured - AI features will fail');
+    } else {
+      logInfo('✅ OpenAI API key configured for AI processing');
+    }
+  }
+  
+  // Check file processing dependencies
+  try {
+    require('pdf-parse');
+    require('mammoth');
+    logInfo('✅ File processing libraries available (pdf-parse, mammoth)');
+  } catch (error) {
+    errors.push('File processing libraries not installed - file upload will fail');
+  }
+  
+  // Check upload directory
+  const fs = require('fs');
+  const path = require('path');
+  const uploadsDir = path.join(__dirname, '../uploads/briefs');
+  
+  try {
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+      logInfo('✅ Brief uploads directory created');
+    } else {
+      logInfo('✅ Brief uploads directory exists');
+    }
+  } catch (error) {
+    warnings.push('Cannot create uploads directory - file uploads may fail');
+  }
+  
+  if (errors.length > 0) {
+    logError('❌ Brief module environment errors:', { errors });
+    return false;
+  }
+  
+  if (warnings.length > 0) {
+    logWarn('⚠️  Brief module environment warnings:', { warnings });
+  } else {
+    logInfo('✅ Brief module environment validation passed');
+  }
+  
+  return true;
+};
+
 // ============================================
 // ENHANCED APPLICATION INITIALIZATION
 // ============================================
 
 /**
- * Initialize the application with enhanced invoice support
+ * Initialize the application with enhanced invoice and brief support
  */
 const initializeApp = async () => {
   try {
@@ -955,11 +1365,17 @@ const initializeApp = async () => {
     await initializeDatabase();
     logInfo('✅ Database connection established');
     
-    // Validate invoice environment
+    // Validate environments
     logInfo('📄 Validating invoice module environment...');
     const invoiceEnvOk = validateInvoiceEnvironment();
     if (!invoiceEnvOk) {
       throw new Error('Invoice module environment validation failed');
+    }
+    
+    logInfo('📋 Validating brief module environment...');
+    const briefEnvOk = validateBriefEnvironment();
+    if (!briefEnvOk) {
+      logWarn('⚠️  Brief module environment validation failed - some features may be limited');
     }
     
     // Initialize external services
@@ -975,15 +1391,33 @@ const initializeApp = async () => {
       logWarn('⚠️  Invoice services partially initialized');
     }
     
+    // Initialize brief services
+    logInfo('📋 Initializing brief services...');
+    const briefServicesOk = await initializeBriefServices();
+    if (briefServicesOk) {
+      logInfo('✅ Brief services initialized successfully');
+    } else {
+      logWarn('⚠️  Brief services partially initialized');
+    }
+    
     // Log module status
     logInfo(`📦 Loaded ${loadedModules}/${totalModules} modules (${Math.round((loadedModules/totalModules)*100)}% complete)`);
     
-    // Log invoice module status
+    // Log module statuses
     const invoiceStatus = checkModuleExists('invoices');
+    const briefStatus = checkModuleExists('briefs');
+    
     if (invoiceStatus.available) {
       logInfo('📄 Invoice module status:', {
         status: invoiceStatus.status,
         features: invoiceStatus.features
+      });
+    }
+    
+    if (briefStatus.available) {
+      logInfo('📋 Brief module status:', {
+        status: briefStatus.status,
+        features: briefStatus.features
       });
     }
     
@@ -1053,6 +1487,16 @@ const initializeServices = async () => {
       }
     }
     
+    // File Processing Service Check
+    try {
+      require('pdf-parse');
+      require('mammoth');
+      logInfo('📄 File processing services available');
+      servicesInitialized++;
+    } catch (error) {
+      logWarn('⚠️  File processing services not available', { error: error.message });
+    }
+    
     logInfo(`🔧 Initialized ${servicesInitialized} external services`);
     return true;
   } catch (error) {
@@ -1120,4 +1564,7 @@ module.exports = app;
 module.exports.initializeApp = initializeApp;
 module.exports.gracefulShutdown = gracefulShutdown;
 module.exports.initializeInvoiceServices = initializeInvoiceServices;
+module.exports.initializeBriefServices = initializeBriefServices;
 module.exports.validateInvoiceEnvironment = validateInvoiceEnvironment;
+module.exports.validateBriefEnvironment = validateBriefEnvironment;
+module.exports.rateLimitByTier = rateLimitByTier;

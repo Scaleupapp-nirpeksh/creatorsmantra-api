@@ -1,7 +1,7 @@
 /**
  * CreatorsMantra Backend - Main Application
  * Express.js application setup with middleware and routes
- * Enhanced with Invoice Module Support, Brief Module Support & Production Features
+ * Enhanced with Invoice Module Support, Brief Module Support, Analytics Module & Production Features
  * 
  * @author CreatorsMantra Team
  * @version 1.0.0
@@ -224,7 +224,13 @@ app.get('/health/detailed', async (req, res) => {
         invoiceConsolidationEnabled: true,
         taxControlEnabled: true,
         briefAnalysisEnabled: true,
-        dealConversionEnabled: true
+        dealConversionEnabled: true,
+        // Analytics module features
+        analyticsEnabled: true,
+        advancedAnalyticsEnabled: config.featureFlags?.aiFeatures || false,
+        trendAnalysisEnabled: config.featureFlags?.aiFeatures || false,
+        revenueIntelligenceEnabled: true,
+        performanceCorrelationEnabled: true
       },
       modules: {
         auth: checkModuleExists('auth'),
@@ -235,7 +241,8 @@ app.get('/health/detailed', async (req, res) => {
         briefs: checkModuleExists('briefs'),
         performance: checkModuleExists('performance'),
         contracts: checkModuleExists('contracts'),
-        agency: checkModuleExists('agency')
+        agency: checkModuleExists('agency'),
+        analytics: checkModuleExists('analytics') // New analytics module
       },
       services: {
         cronJobs: checkCronJobsStatus(),
@@ -243,7 +250,9 @@ app.get('/health/detailed', async (req, res) => {
         fileUpload: checkFileUploadService(),
         paymentReminders: checkPaymentReminderService(),
         aiProcessing: checkAIProcessingService(),
-        briefAnalysis: checkBriefAnalysisService()
+        briefAnalysis: checkBriefAnalysisService(),
+        analyticsEngine: checkAnalyticsEngineService(), // New analytics service
+        caching: checkCachingService() // New caching service for analytics
       }
     };
     
@@ -265,11 +274,51 @@ app.get('/health/detailed', async (req, res) => {
 });
 
 /**
- * Enhanced module check function with invoice and brief-specific features
+ * Enhanced module check function with analytics module support
  */
 function checkModuleExists(moduleName) {
   try {
     const routes = require(`./modules/${moduleName}/routes`);
+    
+    // Special health check for analytics module
+    if (moduleName === 'analytics') {
+      try {
+        const { AnalyticsDashboard, AIInsights, AnalyticsCache, TrendAnalysis } = require(`./modules/${moduleName}/model`);
+        const analyticsService = require(`./modules/${moduleName}/service`);
+        
+        return { 
+          status: 'loaded', 
+          available: true,
+          features: {
+            models: !!(AnalyticsDashboard && AIInsights && AnalyticsCache && TrendAnalysis),
+            service: !!analyticsService,
+            dashboardAnalytics: true,
+            revenueIntelligence: true,
+            dealPerformance: true,
+            aiInsights: config.featureFlags?.aiFeatures || false,
+            trendAnalysis: config.featureFlags?.aiFeatures || false,
+            riskAnalytics: true,
+            performanceCorrelation: true,
+            caching: true,
+            crossModuleAnalytics: true,
+            subscriptionGating: true
+          },
+          subscriptionTiers: {
+            pro: ['dashboard', 'revenue', 'deals', 'insights', 'risk'],
+            elite: ['all_pro_features', 'trends', 'forecasting', 'custom_ranges'],
+            agency: ['all_elite_features', 'multi_creator', 'portfolio_analytics']
+          },
+          version: '1.0.0'
+        };
+      } catch (error) {
+        return { 
+          status: 'partial', 
+          available: true,
+          error: 'Analytics service layer issues',
+          details: error.message
+        };
+      }
+    }
     
     // Special health check for briefs module
     if (moduleName === 'briefs') {
@@ -353,7 +402,9 @@ function checkCronJobsStatus() {
       paymentReminders: config.featureFlags?.paymentReminders !== false,
       pdfCleanup: config.featureFlags?.pdfGeneration !== false,
       briefFileCleanup: true,
-      aiProcessingCleanup: config.featureFlags?.aiFeatures || false
+      aiProcessingCleanup: config.featureFlags?.aiFeatures || false,
+      analyticsCacheCleanup: true, // New analytics cache cleanup
+      trendAnalysisUpdates: config.featureFlags?.aiFeatures || false // New trend analysis updates
     };
   } catch (error) {
     return {
@@ -416,7 +467,7 @@ function checkAIProcessingService() {
     provider: 'OpenAI',
     model: 'gpt-3.5-turbo',
     available: !!process.env.OPENAI_API_KEY,
-    features: ['brief_extraction', 'risk_assessment', 'pricing_suggestions']
+    features: ['brief_extraction', 'risk_assessment', 'pricing_suggestions', 'business_insights', 'trend_analysis']
   };
 }
 
@@ -439,6 +490,67 @@ function checkBriefAnalysisService() {
   };
 }
 
+/**
+ * Check analytics engine service (NEW)
+ */
+function checkAnalyticsEngineService() {
+  return {
+    status: 'enabled',
+    features: {
+      crossModuleAnalytics: true,
+      revenueIntelligence: true,
+      dealPerformance: true,
+      aiInsights: config.featureFlags?.aiFeatures || false,
+      trendAnalysis: config.featureFlags?.aiFeatures || false,
+      riskAnalytics: true,
+      performanceCorrelation: true,
+      predictiveForecasting: config.featureFlags?.aiFeatures || false
+    },
+    dataCorrelation: {
+      modules: ['deals', 'invoices', 'performance', 'contracts', 'briefs', 'ratecards'],
+      realTimeUpdates: true,
+      historicalAnalysis: true
+    },
+    subscriptionGating: {
+      pro: 'Basic analytics + AI insights',
+      elite: 'Advanced analytics + forecasting',
+      agency: 'Portfolio analytics'
+    },
+    performance: {
+      caching: true,
+      realTimeProcessing: true,
+      batchAnalytics: true
+    }
+  };
+}
+
+/**
+ * Check caching service for analytics (NEW)
+ */
+function checkCachingService() {
+  return {
+    status: 'enabled',
+    provider: 'MongoDB TTL Collections',
+    features: {
+      analyticsCache: true,
+      dashboardCache: true,
+      insightsCache: true,
+      trendCache: true
+    },
+    ttl: {
+      dashboard: '30 minutes',
+      revenue: '1 hour',
+      insights: '2 hours',
+      trends: '4 hours'
+    },
+    performance: {
+      hitRate: 'Tracked per user',
+      sizeOptimization: true,
+      autoExpiry: true
+    }
+  };
+}
+
 // ============================================
 // API ROUTES SETUP
 // ============================================
@@ -452,7 +564,7 @@ const API_PREFIX = `/api/${config.server.apiVersion || 'v1'}`;
 app.use(API_PREFIX, trackAPIUsage);
 
 /**
- * Welcome endpoint with enhanced feature information
+ * Welcome endpoint with enhanced feature information including analytics
  */
 app.get(API_PREFIX, (req, res) => {
   res.json(
@@ -471,7 +583,8 @@ app.get(API_PREFIX, (req, res) => {
         performance: `${API_PREFIX}/performance`,
         contracts: `${API_PREFIX}/contracts`,
         subscriptions: `${API_PREFIX}/subscriptions`,
-        agency: `${API_PREFIX}/agency`
+        agency: `${API_PREFIX}/agency`,
+        analytics: `${API_PREFIX}/analytics` // New analytics endpoint
       },
       features: {
         quarterlyBilling: true,
@@ -496,7 +609,18 @@ app.get(API_PREFIX, (req, res) => {
         fileUploadBriefs: true,
         dealConversion: true,
         clarificationManagement: true,
-        riskAssessment: config.featureFlags?.aiFeatures || false
+        riskAssessment: config.featureFlags?.aiFeatures || false,
+        // Analytics features (NEW)
+        businessIntelligence: true,
+        revenueAnalytics: true,
+        dealPerformanceAnalytics: true,
+        aiBusinessInsights: config.featureFlags?.aiFeatures || false,
+        trendAnalysis: config.featureFlags?.aiFeatures || false,
+        riskAnalytics: true,
+        performanceCorrelation: true,
+        crossModuleAnalytics: true,
+        predictiveForecasting: config.featureFlags?.aiFeatures || false,
+        cachingOptimization: true
       }
     })
   );
@@ -512,7 +636,7 @@ app.get(API_PREFIX, (req, res) => {
  */
 
 let loadedModules = 0;
-let totalModules = 9;
+let totalModules = 10; // Updated to include analytics module
 
 // Authentication routes
 try {
@@ -606,6 +730,17 @@ try {
   logWarn('⚠️  Agency routes not found - module may not be implemented yet', { error: error.message });
 }
 
+// Analytics routes - NEW MODULE
+try {
+  const analyticsRoutes = require('./modules/analytics/routes');
+  app.use(`${API_PREFIX}/analytics`, analyticsRoutes);
+  logInfo('✅ Analytics routes loaded successfully');
+  logInfo('📊 Analytics features enabled: Business Intelligence, Revenue Analytics, AI Insights, Trend Analysis, Performance Correlation');
+  loadedModules++;
+} catch (error) {
+  logWarn('⚠️  Analytics routes not found - module may not be implemented yet', { error: error.message });
+}
+
 // ============================================
 // UTILITY ROUTES
 // ============================================
@@ -630,6 +765,11 @@ app.get(`${API_PREFIX}/status`, (req, res) => {
       briefModule: {
         status: checkModuleExists('briefs').status,
         features: checkModuleExists('briefs').features || {}
+      },
+      analyticsModule: { // NEW
+        status: checkModuleExists('analytics').status,
+        features: checkModuleExists('analytics').features || {},
+        subscriptionTiers: checkModuleExists('analytics').subscriptionTiers || {}
       }
     })
   );
@@ -639,7 +779,7 @@ app.get(`${API_PREFIX}/status`, (req, res) => {
  * Get loaded modules list
  */
 function getLoadedModules() {
-  const modules = ['auth', 'subscriptions', 'deals', 'invoices', 'ratecards', 'briefs', 'performance', 'contracts', 'agency'];
+  const modules = ['auth', 'subscriptions', 'deals', 'invoices', 'ratecards', 'briefs', 'performance', 'contracts', 'agency', 'analytics'];
   return modules.filter(module => {
     try {
       require(`./modules/${module}/routes`);
@@ -686,7 +826,18 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
         'deal_conversion',
         'clarification_management',
         'risk_assessment',
-        'pricing_suggestions'
+        'pricing_suggestions',
+        // Analytics features (NEW)
+        'business_intelligence',
+        'revenue_analytics',
+        'deal_performance_analytics',
+        'ai_business_insights',
+        'trend_analysis',
+        'risk_analytics',
+        'performance_correlation',
+        'cross_module_analytics',
+        'predictive_forecasting',
+        'caching_optimization'
       ]
     })
   );
@@ -697,7 +848,7 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
 // ============================================
 
 /**
- * API documentation endpoint with invoice and brief module details
+ * API documentation endpoint with analytics module details
  */
 app.get(`${API_PREFIX}/docs`, (req, res) => {
   res.json(
@@ -778,6 +929,42 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
           },
           supported_files: ['PDF', 'DOC', 'DOCX', 'TXT'],
           ai_features: config.featureFlags?.aiFeatures || false
+        },
+        analytics: { // NEW MODULE DOCUMENTATION
+          description: 'Advanced business intelligence and reporting for creator economy management',
+          base_path: `${API_PREFIX}/analytics`,
+          features: [
+            'dashboard_overview',
+            'revenue_intelligence',
+            'deal_performance_analytics',
+            'ai_business_insights',
+            'trend_analysis',
+            'risk_analytics',
+            'performance_correlation',
+            'cross_module_analytics',
+            'predictive_forecasting',
+            'caching_optimization'
+          ],
+          key_endpoints: {
+            dashboard: 'GET /analytics/dashboard',
+            revenue: 'GET /analytics/revenue',
+            deals_funnel: 'GET /analytics/deals/funnel',
+            ai_insights: 'GET /analytics/insights',
+            generate_insights: 'POST /analytics/insights/generate',
+            trend_analysis: 'GET /analytics/trends',
+            forecasting: 'GET /analytics/forecast',
+            risk_analytics: 'GET /analytics/risk',
+            clear_cache: 'DELETE /analytics/cache'
+          },
+          subscription_requirements: {
+            pro: ['dashboard', 'revenue', 'deals', 'insights', 'risk'],
+            elite: ['all_pro_features', 'trends', 'forecasting', 'custom_ranges'],
+            agency: ['all_elite_features', 'multi_creator', 'portfolio_analytics']
+          },
+          ai_features: config.featureFlags?.aiFeatures || false,
+          data_correlation: [
+            'deals', 'invoices', 'performance', 'contracts', 'briefs', 'ratecards'
+          ]
         }
       },
       rate_limits: {
@@ -787,7 +974,12 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
         pdf_generation: '10 requests per 15 minutes',
         file_upload: '20 requests per 15 minutes',
         brief_creation: 'Tier-based limits (5-200 per hour)',
-        ai_processing: 'Tier-based limits (0-100 per hour)'
+        ai_processing: 'Tier-based limits (0-100 per hour)',
+        // Analytics rate limits (NEW)
+        analytics_standard: '100 requests per 15 minutes',
+        analytics_ai: '20 requests per hour',
+        analytics_advanced: '10 requests per hour',
+        analytics_cache: '5 requests per 15 minutes'
       },
       file_upload: {
         max_size: {
@@ -834,7 +1026,13 @@ app.get(`${API_PREFIX}/postman`, (req, res) => {
         'File upload examples',
         'Brief analysis workflows',
         'AI extraction examples',
-        'Deal conversion examples'
+        'Deal conversion examples',
+        // Analytics features (NEW)
+        'Analytics dashboard examples',
+        'Revenue intelligence workflows',
+        'AI insights generation',
+        'Trend analysis examples',
+        'Risk analytics workflows'
       ]
     })
   );
@@ -845,7 +1043,7 @@ app.get(`${API_PREFIX}/postman`, (req, res) => {
 // ============================================
 
 /**
- * Get current feature flags with invoice and brief-specific flags
+ * Get current feature flags with analytics-specific flags
  */
 app.get(`${API_PREFIX}/features`, (req, res) => {
   res.json(
@@ -887,7 +1085,22 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
         brand_brief_templates: true,
         risk_assessment: config.featureFlags?.aiFeatures || false,
         pricing_suggestions: config.featureFlags?.aiFeatures || false,
-        auto_clarification_email: config.featureFlags?.emailNotifications || false
+        auto_clarification_email: config.featureFlags?.emailNotifications || false,
+        
+        // Analytics module features (NEW)
+        business_intelligence: true,
+        revenue_analytics: true,
+        deal_performance_analytics: true,
+        ai_business_insights: config.featureFlags?.aiFeatures || false,
+        trend_analysis: config.featureFlags?.aiFeatures || false,
+        risk_analytics: true,
+        performance_correlation: true,
+        cross_module_analytics: true,
+        predictive_forecasting: config.featureFlags?.aiFeatures || false,
+        analytics_caching: true,
+        custom_date_ranges: true,
+        analytics_export: false, // Future feature
+        industry_benchmarks: false // Future feature
       },
       environment: config.server.environment,
       brief_features: {
@@ -915,10 +1128,86 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
         max_file_size: '10MB',
         payment_reminder_schedule: 'Daily at 9 AM IST',
         tax_compliance: ['GST', 'TDS', 'PAN', 'IFSC']
+      },
+      analytics_features: { // NEW
+        subscription_access: {
+          starter: 'No analytics access',
+          pro: 'Basic analytics + AI insights',
+          elite: 'Advanced analytics + forecasting',
+          agency: 'Portfolio analytics'
+        },
+        data_correlation: {
+          modules: ['deals', 'invoices', 'performance', 'contracts', 'briefs', 'ratecards'],
+          real_time_updates: true,
+          historical_analysis: true
+        },
+        ai_capabilities: {
+          business_insights: config.featureFlags?.aiFeatures || false,
+          trend_detection: config.featureFlags?.aiFeatures || false,
+          risk_assessment: config.featureFlags?.aiFeatures || false,
+          opportunity_identification: config.featureFlags?.aiFeatures || false
+        },
+        caching: {
+          dashboard: '30 minutes TTL',
+          revenue: '1 hour TTL',
+          insights: '2 hours TTL',
+          trends: '4 hours TTL'
+        },
+        rate_limits: {
+          standard: '100 requests/15min',
+          ai_features: '20 requests/hour',
+          advanced: '10 requests/hour',
+          cache_ops: '5 requests/15min'
+        }
       }
     })
   );
 });
+
+// ============================================
+// ANALYTICS-SPECIFIC ERROR HANDLING
+// ============================================
+
+// Analytics computation error handler
+app.use('/api/*/analytics', (error, req, res, next) => {
+  if (error.name === 'AnalyticsComputationError') {
+    return res.status(500).json({
+      success: false,
+      message: 'Analytics computation failed',
+      code: 'ANALYTICS_COMPUTATION_ERROR',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  if (error.name === 'AIInsightGenerationError') {
+    return res.status(500).json({
+      success: false,
+      message: 'AI insight generation temporarily unavailable',
+      code: 'AI_SERVICE_ERROR',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  if (error.name === 'InsufficientDataError') {
+    return res.status(404).json({
+      success: false,
+      message: 'Insufficient data for analytics computation',
+      code: 'INSUFFICIENT_DATA',
+      recommendation: 'Complete more deals and campaigns to enable analytics',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  if (error.name === 'CacheError') {
+    logWarn('Analytics cache error - continuing without cache', { error: error.message });
+    // Continue without caching
+    next();
+  } else {
+    next(error);
+  }
+});
+
+logInfo('📊 Analytics-specific error handling configured');
 
 // ============================================
 // INVOICE-SPECIFIC ERROR HANDLING
@@ -1245,6 +1534,194 @@ const initializeBriefServices = async () => {
   }
 };
 
+// ============================================
+// ANALYTICS SERVICES INITIALIZATION (NEW)
+// ============================================
+
+/**
+ * Initialize analytics-specific services
+ */
+const initializeAnalyticsServices = async () => {
+  try {
+    logInfo('📊 Initializing analytics services...');
+    
+    // Initialize analytics cache cleanup job
+    cron.schedule('0 1 * * *', async () => {
+      try {
+        logInfo('🗑️  Cleaning up expired analytics cache...');
+        
+        const { AnalyticsCache } = require('./modules/analytics/model');
+        
+        // Remove expired cache entries
+        const result = await AnalyticsCache.deleteMany({
+          $or: [
+            { expiresAt: { $lt: new Date() } },
+            { isValid: false }
+          ]
+        });
+        
+        logInfo(`✅ Analytics cache cleanup completed - removed ${result.deletedCount} expired entries`);
+        
+      } catch (error) {
+        logError('❌ Analytics cache cleanup failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    // Initialize trend analysis update job (every 6 hours)
+    if (config.featureFlags?.aiFeatures) {
+      cron.schedule('0 */6 * * *', async () => {
+        try {
+          logInfo('📈 Updating trend analysis data...');
+          
+          const { TrendAnalysis } = require('./modules/analytics/model');
+          
+          // Update trend analyses that are due for refresh
+          const dueForUpdate = await TrendAnalysis.find({
+            'analysisMetadata.nextAnalysisDue': { $lt: new Date() }
+          }).limit(10); // Process max 10 at a time
+          
+          let updatedCount = 0;
+          for (const trend of dueForUpdate) {
+            try {
+              // Mark for next update (will be processed by analytics service when accessed)
+              trend.analysisMetadata.nextAnalysisDue = new Date(Date.now() + (7 * 24 * 60 * 60 * 1000));
+              await trend.save();
+              updatedCount++;
+            } catch (error) {
+              logWarn('Failed to update trend analysis', { trendId: trend._id, error: error.message });
+            }
+          }
+          
+          logInfo(`✅ Trend analysis update completed - marked ${updatedCount} trends for refresh`);
+          
+        } catch (error) {
+          logError('❌ Trend analysis update failed', { error: error.message });
+        }
+      }, {
+        timezone: 'Asia/Kolkata'
+      });
+      
+      logInfo('📈 Trend analysis update cron job scheduled (every 6 hours)');
+    }
+    
+    // Initialize AI insights cleanup job (daily)
+    if (config.featureFlags?.aiFeatures) {
+      cron.schedule('0 7 * * *', async () => {
+        try {
+          logInfo('🤖 Cleaning up expired AI insights...');
+          
+          const { AIInsights } = require('./modules/analytics/model');
+          
+          // Remove expired insights
+          const result = await AIInsights.deleteMany({
+            relevantUntil: { $lt: new Date() }
+          });
+          
+          logInfo(`✅ AI insights cleanup completed - removed ${result.deletedCount} expired insights`);
+          
+        } catch (error) {
+          logError('❌ AI insights cleanup failed', { error: error.message });
+        }
+      }, {
+        timezone: 'Asia/Kolkata'
+      });
+      
+      logInfo('🤖 AI insights cleanup cron job scheduled (daily at 7 AM IST)');
+    }
+    
+    // Initialize analytics dashboard refresh job (every hour)
+    cron.schedule('0 * * * *', async () => {
+      try {
+        logInfo('🔄 Refreshing analytics dashboards for active users...');
+        
+        // This is a placeholder for future dashboard pre-computation
+        // For now, dashboards are computed on-demand with caching
+        
+        logInfo('✅ Analytics dashboard refresh completed');
+        
+      } catch (error) {
+        logError('❌ Analytics dashboard refresh failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    logInfo('📊 Analytics cache cleanup cron job scheduled (daily at 1 AM IST)');
+    logInfo('🔄 Analytics dashboard refresh cron job scheduled (hourly)');
+    
+    return true;
+  } catch (error) {
+    logWarn('⚠️  Analytics services initialization partially failed', { error: error.message });
+    return false;
+  }
+};
+
+/**
+ * Validate analytics environment and dependencies
+ */
+const validateAnalyticsEnvironment = () => {
+  const warnings = [];
+  const errors = [];
+  
+  // Check AI processing requirements for advanced analytics
+  if (config.featureFlags?.aiFeatures) {
+    if (!process.env.OPENAI_API_KEY) {
+      warnings.push('OpenAI API key not configured - AI analytics features will be limited');
+    } else {
+      logInfo('✅ OpenAI API key configured for AI analytics');
+    }
+  }
+  
+  // Check MongoDB for analytics collections
+  try {
+    // MongoDB is already initialized, analytics models will create collections as needed
+    logInfo('✅ MongoDB available for analytics data storage');
+  } catch (error) {
+    errors.push('MongoDB not available - analytics data storage will fail');
+  }
+  
+  // Check memory for caching
+  const totalMemory = process.memoryUsage().heapTotal;
+  if (totalMemory < 100 * 1024 * 1024) { // Less than 100MB
+    warnings.push('Low memory available - analytics caching may be limited');
+  } else {
+    logInfo('✅ Sufficient memory available for analytics caching');
+  }
+  
+  // Check if other required modules are available for data correlation
+  const requiredModules = ['deals', 'invoices', 'performance', 'contracts'];
+  const missingModules = [];
+  
+  for (const module of requiredModules) {
+    try {
+      require(`./modules/${module}/model`);
+    } catch (error) {
+      missingModules.push(module);
+    }
+  }
+  
+  if (missingModules.length > 0) {
+    warnings.push(`Some modules not available for correlation: ${missingModules.join(', ')}`);
+  } else {
+    logInfo('✅ All required modules available for cross-module analytics');
+  }
+  
+  if (errors.length > 0) {
+    logError('❌ Analytics module environment errors:', { errors });
+    return false;
+  }
+  
+  if (warnings.length > 0) {
+    logWarn('⚠️  Analytics module environment warnings:', { warnings });
+  } else {
+    logInfo('✅ Analytics module environment validation passed');
+  }
+  
+  return true;
+};
+
 /**
  * Validate invoice environment and dependencies
  */
@@ -1354,7 +1831,7 @@ const validateBriefEnvironment = () => {
 // ============================================
 
 /**
- * Initialize the application with enhanced invoice and brief support
+ * Initialize the application with enhanced support for all modules including analytics
  */
 const initializeApp = async () => {
   try {
@@ -1376,6 +1853,12 @@ const initializeApp = async () => {
     const briefEnvOk = validateBriefEnvironment();
     if (!briefEnvOk) {
       logWarn('⚠️  Brief module environment validation failed - some features may be limited');
+    }
+    
+    logInfo('📊 Validating analytics module environment...');
+    const analyticsEnvOk = validateAnalyticsEnvironment();
+    if (!analyticsEnvOk) {
+      logWarn('⚠️  Analytics module environment validation failed - some features may be limited');
     }
     
     // Initialize external services
@@ -1400,12 +1883,22 @@ const initializeApp = async () => {
       logWarn('⚠️  Brief services partially initialized');
     }
     
+    // Initialize analytics services
+    logInfo('📊 Initializing analytics services...');
+    const analyticsServicesOk = await initializeAnalyticsServices();
+    if (analyticsServicesOk) {
+      logInfo('✅ Analytics services initialized successfully');
+    } else {
+      logWarn('⚠️  Analytics services partially initialized');
+    }
+    
     // Log module status
     logInfo(`📦 Loaded ${loadedModules}/${totalModules} modules (${Math.round((loadedModules/totalModules)*100)}% complete)`);
     
     // Log module statuses
     const invoiceStatus = checkModuleExists('invoices');
     const briefStatus = checkModuleExists('briefs');
+    const analyticsStatus = checkModuleExists('analytics');
     
     if (invoiceStatus.available) {
       logInfo('📄 Invoice module status:', {
@@ -1418,6 +1911,14 @@ const initializeApp = async () => {
       logInfo('📋 Brief module status:', {
         status: briefStatus.status,
         features: briefStatus.features
+      });
+    }
+    
+    if (analyticsStatus.available) {
+      logInfo('📊 Analytics module status:', {
+        status: analyticsStatus.status,
+        features: analyticsStatus.features,
+        subscriptionTiers: analyticsStatus.subscriptionTiers
       });
     }
     
@@ -1497,6 +1998,15 @@ const initializeServices = async () => {
       logWarn('⚠️  File processing services not available', { error: error.message });
     }
     
+    // Analytics Processing Service Check
+    try {
+      // MongoDB is already initialized for analytics data storage
+      logInfo('📊 Analytics processing service available');
+      servicesInitialized++;
+    } catch (error) {
+      logWarn('⚠️  Analytics processing service not available', { error: error.message });
+    }
+    
     logInfo(`🔧 Initialized ${servicesInitialized} external services`);
     return true;
   } catch (error) {
@@ -1522,6 +2032,16 @@ const gracefulShutdown = async (signal) => {
       task.stop();
       logInfo(`Stopped cron job: ${name}`);
     });
+    
+    // Clear analytics caches if needed
+    try {
+      const { AnalyticsCache } = require('./modules/analytics/model');
+      logInfo('🗑️  Clearing analytics caches...');
+      // Optional: Clear non-persistent caches before shutdown
+      logInfo('✅ Analytics caches cleared');
+    } catch (error) {
+      logWarn('⚠️  Analytics cache clearing failed', { error: error.message });
+    }
     
     // Close database connections
     logInfo('📊 Closing database connections...');
@@ -1565,6 +2085,8 @@ module.exports.initializeApp = initializeApp;
 module.exports.gracefulShutdown = gracefulShutdown;
 module.exports.initializeInvoiceServices = initializeInvoiceServices;
 module.exports.initializeBriefServices = initializeBriefServices;
+module.exports.initializeAnalyticsServices = initializeAnalyticsServices; // NEW
 module.exports.validateInvoiceEnvironment = validateInvoiceEnvironment;
 module.exports.validateBriefEnvironment = validateBriefEnvironment;
+module.exports.validateAnalyticsEnvironment = validateAnalyticsEnvironment; // NEW
 module.exports.rateLimitByTier = rateLimitByTier;

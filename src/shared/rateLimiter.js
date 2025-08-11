@@ -3,7 +3,7 @@
  * API rate limiting middleware with subscription tier support
  * 
  * @author CreatorsMantra Team
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 const rateLimit = require('express-rate-limit');
@@ -70,6 +70,13 @@ const rateLimitByTier = (operation) => {
           elite: { windowMs: 15 * 60 * 1000, max: 100 },
           agency_starter: { windowMs: 15 * 60 * 1000, max: 150 },
           agency_pro: { windowMs: 15 * 60 * 1000, max: 300 }
+        },
+        analytics: {
+          starter: { windowMs: 15 * 60 * 1000, max: 0 }, // No analytics for starter
+          pro: { windowMs: 15 * 60 * 1000, max: 100 },
+          elite: { windowMs: 15 * 60 * 1000, max: 200 },
+          agency_starter: { windowMs: 15 * 60 * 1000, max: 300 },
+          agency_pro: { windowMs: 15 * 60 * 1000, max: 500 }
         }
       };
 
@@ -217,6 +224,13 @@ const getRateLimitConfig = (tier, operation) => {
       elite: { max: 100, windowMinutes: 60 },
       agency_starter: { max: 200, windowMinutes: 60 },
       agency_pro: { max: 500, windowMinutes: 60 }
+    },
+    analytics: {
+      starter: { max: 0, windowMinutes: 15 },
+      pro: { max: 100, windowMinutes: 15 },
+      elite: { max: 200, windowMinutes: 15 },
+      agency_starter: { max: 300, windowMinutes: 15 },
+      agency_pro: { max: 500, windowMinutes: 15 }
     }
   };
 
@@ -224,10 +238,19 @@ const getRateLimitConfig = (tier, operation) => {
 };
 
 /**
- * Export as both a function and a shorthand
+ * Main rate limiter function - this is what gets imported as { rateLimit }
+ */
+const rateLimiter = createRateLimiter;
+
+/**
+ * Export multiple formats to ensure compatibility
  */
 module.exports = {
+  // Main exports that your analytics routes expect
   rateLimit: createRateLimiter,
+  rateLimiter: createRateLimiter, // Added this to fix the error
+  
+  // Additional exports
   createRateLimiter,
   rateLimitByTier,
   authRateLimit,
@@ -235,3 +258,6 @@ module.exports = {
   fileUploadRateLimit,
   getRateLimitConfig
 };
+
+// Also support default export for different import styles
+module.exports.default = createRateLimiter;

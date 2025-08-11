@@ -44,6 +44,7 @@
     "puppeteer": "^21.0.3",
     "qrcode": "^1.5.4",
     "razorpay": "^2.9.2",
+    "twilio": "^5.8.0",
     "winston": "^3.10.0"
   },
   "devDependencies": {

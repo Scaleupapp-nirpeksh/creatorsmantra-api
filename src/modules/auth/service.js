@@ -127,45 +127,79 @@ class AuthService {
     }
   }
 
+  async debugSMSConfig() {
+    console.log('=== SMS DEBUG INFO ===');
+    console.log('NODE_ENV:', process.env.NODE_ENV);
+    console.log('TWILIO_ACCOUNT_SID:', process.env.TWILIO_ACCOUNT_SID ? 'SET' : 'MISSING');
+    console.log('TWILIO_AUTH_TOKEN:', process.env.TWILIO_AUTH_TOKEN ? 'SET' : 'MISSING');
+    console.log('TWILIO_PHONE_NUMBER:', process.env.TWILIO_PHONE_NUMBER ? 'SET' : 'MISSING');
+    
+    // Test if Twilio is configured correctly
+    if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+      try {
+        const twilioClient = require('twilio')(
+          process.env.TWILIO_ACCOUNT_SID,
+          process.env.TWILIO_AUTH_TOKEN
+        );
+        console.log('Twilio client created successfully');
+        
+        // Test Twilio account
+        const account = await twilioClient.api.accounts(process.env.TWILIO_ACCOUNT_SID).fetch();
+        console.log('Twilio account status:', account.status);
+      } catch (error) {
+        console.log('Twilio configuration error:', error.message);
+      }
+    }
+    console.log('======================');
+  }
+
   /**
    * Send OTP via SMS using Twilio
    * @param {string} phone - Phone number
    * @param {string} otpCode - OTP code
    * @param {string} purpose - OTP purpose
    */
-  async sendOTPSMS(phone, otpCode, purpose) {
-    try {
-      // Skip SMS in development/test environment
-      if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
-        log('info', 'SMS sending skipped in development', { phone, otpCode });
-        return;
-      }
+ // Modified sendOTPSMS with better logging
+async sendOTPSMS(phone, otpCode, purpose) {
+  try {
+    console.log(`Attempting to send SMS to ${phone}`);
+    console.log('Environment:', process.env.NODE_ENV);
+    
 
-      const twilioClient = require('twilio')(
-        process.env.TWILIO_ACCOUNT_SID,
-        process.env.TWILIO_AUTH_TOKEN
-      );
 
-      const messageTemplates = {
-        registration: `Welcome to CreatorsMantra! Your verification code is: ${otpCode}. Valid for 5 minutes. Don't share this code with anyone.`,
-        login: `Your CreatorsMantra login code is: ${otpCode}. Valid for 5 minutes. Don't share this code with anyone.`,
-        password_reset: `Your CreatorsMantra password reset code is: ${otpCode}. Valid for 5 minutes. Don't share this code with anyone.`
-      };
-
-      await twilioClient.messages.create({
-        body: messageTemplates[purpose] || messageTemplates.registration,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        to: `+91${phone}`
-      });
-
-      log('info', 'OTP SMS sent successfully', { phone, purpose });
-
-    } catch (error) {
-      log('error', 'SMS sending failed', { phone, error: error.message });
-      throw createError('Failed to send OTP. Please try again.', 500, 'SMS_SEND_FAILED');
+    // Check if Twilio credentials are set
+    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+      throw new Error('Twilio credentials not configured');
     }
-  }
 
+    const twilioClient = require('twilio')(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+
+    const messageTemplates = {
+      registration: `Welcome to CreatorsMantra! Your verification code is: ${otpCode}. Valid for 5 minutes. Don't share this code with anyone.`,
+      login: `Your CreatorsMantra login code is: ${otpCode}. Valid for 5 minutes. Don't share this code with anyone.`,
+      password_reset: `Your CreatorsMantra password reset code is: ${otpCode}. Valid for 5 minutes. Don't share this code with anyone.`
+    };
+
+    console.log(`Sending SMS from ${process.env.TWILIO_PHONE_NUMBER} to +91${phone}`);
+    
+    const message = await twilioClient.messages.create({
+      body: messageTemplates[purpose] || messageTemplates.registration,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: `+91${phone}`
+    });
+
+    console.log('✅ SMS sent successfully, SID:', message.sid);
+    log('info', 'OTP SMS sent successfully', { phone, purpose, sid: message.sid });
+
+  } catch (error) {
+    console.log('❌ SMS sending failed:', error.message);
+    log('error', 'SMS sending failed', { phone, error: error.message });
+    throw createError('Failed to send OTP. Please try again.', 500, 'SMS_SEND_FAILED');
+  }
+}
   /**
    * Verify OTP code
    * @param {string} phone - Phone number

@@ -28,7 +28,7 @@ const dealSchema = new mongoose.Schema({
   dealId: {
     type: String,
     unique: true,
-    required: true,
+    //required: true,
     index: true
   },
 
@@ -247,7 +247,7 @@ const dealSchema = new mongoose.Schema({
     
     finalAmount: {
       type: Number,
-      required: true,
+      //required: true,
       min: [0, 'Final amount cannot be negative']
     }
   },
@@ -963,41 +963,60 @@ const dealTemplateSchema = new mongoose.Schema({
 // DEAL SCHEMA METHODS & VIRTUALS
 // ============================================
 
+// Improved pre-save hooks in model.js
+
 // Generate unique deal ID before saving
 dealSchema.pre('save', async function(next) {
-  if (this.isNew) {
-    const User = require('../auth/model').User;
-    const user = await User.findById(this.userId);
-    const year = new Date().getFullYear();
-    const month = String(new Date().getMonth() + 1).padStart(2, '0');
-    const day = String(new Date().getDate()).padStart(2, '0');
-    
-    // Count deals for this user this month
-    const dealsThisMonth = await this.constructor.countDocuments({
-      userId: this.userId,
-      createdAt: {
-        $gte: new Date(year, new Date().getMonth(), 1),
-        $lt: new Date(year, new Date().getMonth() + 1, 1)
+  if (this.isNew && !this.dealId) {
+    try {
+      const User = require('../auth/model').User;
+      const user = await User.findById(this.userId);
+      
+      if (!user) {
+        return next(new Error('User not found'));
       }
-    });
-    
-    const sequence = String(dealsThisMonth + 1).padStart(3, '0');
-    this.dealId = `${user.fullName.substring(0, 3).toUpperCase()}${year}${month}${sequence}`;
+      
+      const year = new Date().getFullYear();
+      const month = String(new Date().getMonth() + 1).padStart(2, '0');
+      
+      // Count deals for this user this month
+      const dealsThisMonth = await this.constructor.countDocuments({
+        userId: this.userId,
+        createdAt: {
+          $gte: new Date(year, new Date().getMonth(), 1),
+          $lt: new Date(year, new Date().getMonth() + 1, 1)
+        }
+      });
+      
+      const sequence = String(dealsThisMonth + 1).padStart(3, '0');
+      const userPrefix = user.fullName ? user.fullName.substring(0, 3).toUpperCase() : 'USR';
+      this.dealId = `${userPrefix}${year}${month}${sequence}`;
+    } catch (error) {
+      return next(error);
+    }
   }
   next();
 });
 
 // Calculate financial amounts before saving
 dealSchema.pre('save', function(next) {
+  // Initialize amounts if not set
+  if (!this.dealValue.gstAmount) this.dealValue.gstAmount = 0;
+  if (!this.dealValue.tdsAmount) this.dealValue.tdsAmount = 0;
+  
+  // Calculate GST if applicable
   if (this.dealValue.gstApplicable) {
     this.dealValue.gstAmount = Math.round(this.dealValue.amount * 0.18);
   }
   
+  // Calculate TDS if applicable
   if (this.dealValue.tdsApplicable) {
     this.dealValue.tdsAmount = Math.round(this.dealValue.amount * 0.10);
   }
   
+  // Calculate final amount
   this.dealValue.finalAmount = this.dealValue.amount + this.dealValue.gstAmount - this.dealValue.tdsAmount;
+  
   next();
 });
 

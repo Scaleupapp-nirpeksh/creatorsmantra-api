@@ -494,8 +494,8 @@ class DealService {
       // Add automatic communication log
       const communicationMessage = this.getStageUpdateMessage(oldStage, newStage);
       await this.addCommunication(dealId, {
-        type: 'internal_note',
-        direction: 'internal',
+        type: 'other',              // ✅ Valid enum value
+        direction: 'outbound',      // ✅ Valid enum value  
         subject: `Stage updated: ${oldStage} → ${newStage}`,
         summary: communicationMessage,
         outcome: 'neutral',

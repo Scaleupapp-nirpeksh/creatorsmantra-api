@@ -20,10 +20,19 @@ const { verifyToken, errorResponse, log } = require('./utils');
  * CORS configuration for frontend communication
  */
 const corsMiddleware = cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: [
+    'http://localhost:3001',  // React development server
+    'http://localhost:3000',  // If frontend also runs on 3000
+    'http://127.0.0.1:3001',
+    'http://127.0.0.1:3000'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: [    'Origin',
+    'X-Requested-With', 
+    'Content-Type', 
+    'Accept',
+    'Authorization']
 });
 
 // ============================================

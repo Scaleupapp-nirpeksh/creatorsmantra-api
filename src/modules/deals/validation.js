@@ -1016,6 +1016,25 @@ const deliverableIdParamSchema = Joi.object({
     })
 });
 
+
+// Add this new combined schema for routes with both dealId and deliverableId
+const dealAndDeliverableParamSchema = Joi.object({
+  dealId: Joi.string()
+    .pattern(/^[0-9a-fA-F]{24}$/)
+    .required()
+    .messages({
+      'string.pattern.base': 'Invalid deal ID format',
+      'any.required': 'Deal ID is required'
+    }),
+  deliverableId: Joi.string()
+    .pattern(/^[0-9a-fA-F]{24}$/)
+    .required()
+    .messages({
+      'string.pattern.base': 'Invalid deliverable ID format',
+      'any.required': 'Deliverable ID is required'
+    })
+});
+
 const communicationIdParamSchema = Joi.object({
   commId: Joi.string()
     .pattern(/^[0-9a-fA-F]{24}$/)
@@ -1089,5 +1108,6 @@ module.exports = {
   deliverableIdParamSchema,
   communicationIdParamSchema,
   stageParamSchema,
-  actionParamSchema
+  actionParamSchema,
+  dealAndDeliverableParamSchema
 };

@@ -44,7 +44,8 @@ const {
   deliverableIdParamSchema,
   communicationIdParamSchema,
   stageParamSchema,
-  actionParamSchema
+  actionParamSchema,
+  dealAndDeliverableParamSchema
 } = require('./validation');
 
 const router = express.Router();
@@ -54,8 +55,8 @@ const router = express.Router();
 // ============================================
 
 const dealLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
+  windowMs: 1 * 60 * 1000,
+  max: 150,
   message: {
     success: false,
     message: 'Too many deal requests. Please try again later.',
@@ -66,8 +67,8 @@ const dealLimiter = rateLimit({
 });
 
 const dealCreationLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
+  windowMs: 1 * 60 * 1000,
+  max: 150,
   message: {
     success: false,
     message: 'Too many deal creation attempts. Please try again later.',
@@ -78,8 +79,8 @@ const dealCreationLimiter = rateLimit({
 });
 
 const analyticsLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 30,
+  windowMs: 1 * 60 * 1000,
+  max: 150,
   message: {
     success: false,
     message: 'Too many analytics requests. Please try again later.',
@@ -150,6 +151,18 @@ router.get('/attention',
   authorizeRoles(['creator', 'manager', 'agency_owner', 'agency_member']),
   authorizeSubscription(DEAL_ALLOWED_TIERS),
   dealController.getDealsNeedingAttention
+);
+
+
+// Update this route
+router.put('/:dealId/deliverables/:deliverableId',
+  dealLimiter,
+  authenticateUser,
+  authorizeRoles(['creator', 'manager', 'agency_owner', 'agency_member']),
+  authorizeSubscription(DEAL_ALLOWED_TIERS),
+  validateRequest(dealAndDeliverableParamSchema, 'params'),  // Use combined schema
+  validateRequest(updateDeliverableSchema),  // This validates the body
+  dealController.updateDeliverable
 );
 
 // Brand profiles routes (without params)

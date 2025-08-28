@@ -259,6 +259,7 @@ const creatorProfileSchema = new mongoose.Schema({
     required: [true, 'Creator type is required']
   },
   
+  
   bio: {
     type: String,
     maxlength: [500, 'Bio cannot exceed 500 characters'],
@@ -510,6 +511,69 @@ const creatorProfileSchema = new mongoose.Schema({
       maxlength: [100, 'PAN name cannot exceed 100 characters']
     }
   },
+
+  // Tax Preferences - FOR INVOICE SYSTEM
+  taxPreferences: {
+    applyGST: {
+      type: Boolean,
+      default: true
+    },
+    
+    gstRate: {
+      type: Number,
+      default: 18,
+      min: [0, 'GST rate cannot be negative'],
+      max: [100, 'GST rate cannot exceed 100%']
+    },
+    
+    gstType: {
+      type: String,
+      enum: ['cgst_sgst', 'igst'],
+      default: 'cgst_sgst'
+    },
+    
+    gstExemptionReason: {
+      type: String,
+      maxlength: [200, 'Exemption reason cannot exceed 200 characters']
+    },
+    
+    applyTDS: {
+      type: Boolean,
+      default: false
+    },
+    
+    tdsRate: {
+      type: Number,
+      default: 10,
+      min: [0, 'TDS rate cannot be negative'],
+      max: [30, 'TDS rate cannot exceed 30%']
+    },
+    
+    entityType: {
+      type: String,
+      enum: ['individual', 'company'],
+      default: 'individual'
+    },
+    
+    hasGSTExemption: {
+      type: Boolean,
+      default: false
+    },
+    
+    exemptionCertificate: {
+      type: String,
+      maxlength: [100, 'Certificate number cannot exceed 100 characters']
+    },
+    
+    exemptionValidUpto: {
+      type: Date
+    },
+    
+    updatedAt: {
+      type: Date,
+      default: Date.now
+    }
+  },
   
   // Manager Relationship (if userType is 'creator_with_manager')
   managers: [{
@@ -620,6 +684,8 @@ const creatorProfileSchema = new mongoose.Schema({
   toJSON: { virtuals: true, getters: true },
   toObject: { virtuals: true, getters: true }
 });
+
+
 
 // ============================================
 // SUBSCRIPTION HISTORY SCHEMA

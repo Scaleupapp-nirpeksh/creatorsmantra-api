@@ -21,7 +21,7 @@ const router = express.Router();
 
 // Standard rate limiting for most operations
 const standardLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 1 * 60 * 1000, // 15 minutes
   max: 50, // 50 requests per window
   message: {
     success: false,
@@ -34,7 +34,7 @@ const standardLimit = rateLimit({
 
 // Restrictive rate limiting for resource-intensive operations
 const restrictiveLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 1 * 60 * 1000, // 15 minutes
   max: 10, // 10 requests per window
   message: {
     success: false,
@@ -70,11 +70,11 @@ const clientDetailsSchema = Joi.object({
     country: Joi.string().max(100).default('India')
   }).optional(),
   gstNumber: Joi.string()
-    .pattern(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}[Z]{1}[0-9A-Z]{1}$/)
-    .optional(),
+  .allow('', null, 'N/A', 'NA')
+  .optional(),
   panNumber: Joi.string()
-    .pattern(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/)
-    .optional(),
+  .allow('', null, 'N/A', 'NA')
+  .optional(),
   isInterstate: Joi.boolean().default(false),
   clientType: Joi.string()
     .valid('brand', 'agency', 'individual', 'company')
@@ -155,11 +155,12 @@ const invoiceSettingsSchema = Joi.object({
 
 // Bank details validation - base schema
 const bankDetailsSchema = Joi.object({
-  accountName: Joi.string().max(100),
-  accountNumber: Joi.string().pattern(/^\d{9,18}$/),
-  bankName: Joi.string().max(100),
+  accountName: Joi.string().max(100).optional(),
+  accountNumber: Joi.string().pattern(/^\d{9,18}$/).optional(),
+  bankName: Joi.string().max(100).optional(),
   ifscCode: Joi.string()
-    .pattern(/^[A-Z]{4}[0][A-Z0-9]{6}$/),
+    .pattern(/^[A-Z]{4}[0][A-Z0-9]{6}$/)
+    .optional(),
   branchName: Joi.string().max(100).optional(),
   upiId: Joi.string()
     .pattern(/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/)
@@ -296,14 +297,14 @@ const paymentRecordingSchema = Joi.object({
   paymentMethod: Joi.string()
     .valid('bank_transfer', 'upi', 'cheque', 'cash', 'online', 'wallet', 'other')
     .required(),
-  transactionId: Joi.string().optional(),
-  referenceNumber: Joi.string().optional(),
-  payerName: Joi.string().optional(),
-  payerAccount: Joi.string().optional(),
-  bankReference: Joi.string().optional(),
+  transactionId: Joi.string().allow('').optional(),
+  referenceNumber: Joi.string().allow('').optional(),  // ← FIXED: Allow empty string
+  payerName: Joi.string().allow('').optional(),        // ← FIXED: Allow empty string
+  payerAccount: Joi.string().allow('').optional(),
+  bankReference: Joi.string().allow('').optional(),
   isVerified: Joi.boolean().default(false),
-  verificationNotes: Joi.string().max(500).optional(),
-  notes: Joi.string().max(1000).optional(),
+  verificationNotes: Joi.string().max(500).allow('').optional(),
+  notes: Joi.string().max(1000).allow('').optional(),
   milestoneInfo: Joi.object({
     milestoneNumber: Joi.number().positive().optional(),
     totalMilestones: Joi.number().positive().optional(),

@@ -11,6 +11,7 @@ const InvoiceService = require('./service');
 const { PaymentTrackingService, PaymentReminderService, PDFGenerationService } = require('./payment-pdf-service');
 const { Invoice, PaymentTracking, InvoiceTemplate } = require('./model');
 const { Deal } = require('../deals/model');
+const { User, CreatorProfile } = require('../auth/model');
 const { 
   successResponse, 
   errorResponse, 
@@ -29,7 +30,7 @@ const {
  */
 const createIndividualInvoice = asyncHandler(async (req, res) => {
   const { dealId, clientDetails, taxSettings, invoiceSettings, bankDetails, notes } = req.body;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
 
   logInfo('Creating individual invoice', { creatorId, dealId });
 
@@ -79,7 +80,7 @@ const createConsolidatedInvoice = asyncHandler(async (req, res) => {
     invoiceSettings,
     bankDetails
   } = req.body;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
 
   logInfo('Creating consolidated invoice', { 
     creatorId, 
@@ -128,7 +129,7 @@ const createConsolidatedInvoice = asyncHandler(async (req, res) => {
  */
 const getAvailableDeals = asyncHandler(async (req, res) => {
   const { criteria, month, year, brandId, agencyId, startDate, endDate } = req.query;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
 
   let deals = [];
 
@@ -195,7 +196,7 @@ const getAvailableDeals = asyncHandler(async (req, res) => {
  */
 const getInvoiceById = asyncHandler(async (req, res) => {
   const { invoiceId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
 
   const invoice = await InvoiceService.getInvoiceById(invoiceId, creatorId);
 
@@ -223,7 +224,7 @@ const getInvoiceById = asyncHandler(async (req, res) => {
  * GET /api/invoices
  */
 const getInvoicesList = asyncHandler(async (req, res) => {
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
   const filters = req.query;
 
   const result = await InvoiceService.getInvoicesList(creatorId, filters);
@@ -239,7 +240,7 @@ const getInvoicesList = asyncHandler(async (req, res) => {
  */
 const updateInvoice = asyncHandler(async (req, res) => {
   const { invoiceId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
   const updateData = req.body;
 
   const updatedInvoice = await InvoiceService.updateInvoice(invoiceId, updateData, creatorId);
@@ -262,7 +263,7 @@ const updateInvoice = asyncHandler(async (req, res) => {
  */
 const deleteInvoice = asyncHandler(async (req, res) => {
   const { invoiceId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
 
   await InvoiceService.deleteInvoice(invoiceId, creatorId);
 
@@ -276,36 +277,78 @@ const deleteInvoice = asyncHandler(async (req, res) => {
 // ============================================
 
 /**
- * Get Creator's Tax Preferences
+ * Get Creator's Tax Preferences - FIXED
  * GET /api/invoices/tax-preferences
  */
 const getTaxPreferences = asyncHandler(async (req, res) => {
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
   
-  // Get from creator profile
-  const User = require('../auth/model').User;
-  const creator = await User.findById(creatorId).populate('creatorProfile');
+  logInfo('Fetching tax preferences', { creatorId });
   
-  const taxPreferences = creator.creatorProfile?.taxPreferences || {
-    applyGST: true,
-    gstRate: 18,
-    gstType: 'cgst_sgst',
-    applyTDS: false,
-    tdsRate: 10,
-    entityType: 'individual'
-  };
+  try {
+    // First verify the user exists
+    const user = await User.findById(creatorId);
+    if (!user) {
+      logError('User not found for tax preferences', { creatorId });
+      return res.status(404).json(
+        errorResponse('User not found', null, 404)
+      );
+    }
+    
+    // Get creator profile by userId (correct relationship)
+    const creatorProfile = await CreatorProfile.findOne({ userId: creatorId });
+    
+    let taxPreferences;
+    
+    if (creatorProfile && creatorProfile.taxPreferences) {
+      // Use existing tax preferences from creator profile
+      taxPreferences = creatorProfile.taxPreferences;
+    } else {
+      // Use default tax preferences based on user type
+      taxPreferences = {
+        applyGST: true,
+        gstRate: 18,
+        gstType: 'cgst_sgst', // Default for intrastate
+        gstExemptionReason: null,
+        applyTDS: false,
+        tdsRate: 10, // 10% for individuals
+        entityType: 'individual',
+        hasGSTExemption: false,
+        exemptionCertificate: null,
+        exemptionValidUpto: null,
+        updatedAt: new Date()
+      };
+      
+      // If creator profile exists but no tax preferences, update it
+      if (creatorProfile) {
+        creatorProfile.taxPreferences = taxPreferences;
+        await creatorProfile.save();
+        logInfo('Created default tax preferences for existing creator profile', { creatorId });
+      }
+    }
 
-  res.json(
-    successResponse('Tax preferences retrieved successfully', { taxPreferences })
-  );
+    res.json(
+      successResponse('Tax preferences retrieved successfully', { 
+        taxPreferences,
+        hasProfile: !!creatorProfile,
+        profileCompleted: creatorProfile ? true : false
+      })
+    );
+    
+  } catch (error) {
+    logError('Error fetching tax preferences', { creatorId, error: error.message });
+    return res.status(500).json(
+      errorResponse('Failed to fetch tax preferences', error.message)
+    );
+  }
 });
 
 /**
- * Update Creator's Tax Preferences
+ * Update Creator's Tax Preferences - FIXED
  * PUT /api/invoices/tax-preferences
  */
 const updateTaxPreferences = asyncHandler(async (req, res) => {
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
   const { 
     applyGST, 
     gstRate, 
@@ -319,31 +362,70 @@ const updateTaxPreferences = asyncHandler(async (req, res) => {
     exemptionValidUpto
   } = req.body;
 
-  const User = require('../auth/model').User;
-  
-  const updateData = {
-    'creatorProfile.taxPreferences': {
-      applyGST,
-      gstRate,
-      gstType,
-      gstExemptionReason,
-      applyTDS,
-      tdsRate,
-      entityType,
-      hasGSTExemption,
-      exemptionCertificate,
+  logInfo('Updating tax preferences', { creatorId, applyGST, applyTDS });
+
+  try {
+    // Verify user exists
+    const user = await User.findById(creatorId);
+    if (!user) {
+      return res.status(404).json(
+        errorResponse('User not found', null, 404)
+      );
+    }
+
+    // Find or create creator profile
+    let creatorProfile = await CreatorProfile.findOne({ userId: creatorId });
+    
+    if (!creatorProfile) {
+      // Create new creator profile if it doesn't exist
+      creatorProfile = new CreatorProfile({
+        userId: creatorId,
+        creatorType: 'lifestyle', // Default, user can change later
+        socialProfiles: {
+          instagram: {},
+          youtube: {}
+        }
+      });
+      
+      logInfo('Creating new creator profile for tax preferences', { creatorId });
+    }
+
+    // Update tax preferences
+    const updatedTaxPreferences = {
+      applyGST: applyGST !== undefined ? applyGST : true,
+      gstRate: gstRate || 18,
+      gstType: gstType || 'cgst_sgst',
+      gstExemptionReason: gstExemptionReason || null,
+      applyTDS: applyTDS !== undefined ? applyTDS : false,
+      tdsRate: tdsRate || 10,
+      entityType: entityType || 'individual',
+      hasGSTExemption: hasGSTExemption || false,
+      exemptionCertificate: exemptionCertificate || null,
       exemptionValidUpto: exemptionValidUpto ? new Date(exemptionValidUpto) : null,
       updatedAt: new Date()
-    }
-  };
+    };
 
-  await User.findByIdAndUpdate(creatorId, updateData);
+    creatorProfile.taxPreferences = updatedTaxPreferences;
+    await creatorProfile.save();
 
-  logInfo('Tax preferences updated', { creatorId, applyGST, applyTDS });
+    logInfo('Tax preferences updated successfully', { 
+      creatorId, 
+      applyGST: updatedTaxPreferences.applyGST, 
+      applyTDS: updatedTaxPreferences.applyTDS 
+    });
 
-  res.json(
-    successResponse('Tax preferences updated successfully')
-  );
+    res.json(
+      successResponse('Tax preferences updated successfully', {
+        taxPreferences: updatedTaxPreferences
+      })
+    );
+
+  } catch (error) {
+    logError('Error updating tax preferences', { creatorId, error: error.message });
+    return res.status(500).json(
+      errorResponse('Failed to update tax preferences', error.message)
+    );
+  }
 });
 
 /**
@@ -411,7 +493,7 @@ const calculateTaxPreview = asyncHandler(async (req, res) => {
  */
 const recordPayment = asyncHandler(async (req, res) => {
   const { invoiceId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
   const paymentData = req.body;
 
   const payment = await PaymentTrackingService.recordPayment(invoiceId, paymentData, creatorId);
@@ -463,7 +545,7 @@ const getPaymentHistory = asyncHandler(async (req, res) => {
 const verifyPayment = asyncHandler(async (req, res) => {
   const { paymentId } = req.params;
   const { verificationNotes } = req.body;
-  const verifiedBy = req.user.userId;
+  const verifiedBy = req.user.id;
 
   const payment = await PaymentTrackingService.verifyPayment(paymentId, verifiedBy, verificationNotes);
 
@@ -505,7 +587,7 @@ const generateInvoicePDF = asyncHandler(async (req, res) => {
  */
 const downloadInvoicePDF = asyncHandler(async (req, res) => {
   const { invoiceId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
 
   const invoice = await Invoice.findOne({ _id: invoiceId, creatorId });
   
@@ -542,7 +624,7 @@ const downloadInvoicePDF = asyncHandler(async (req, res) => {
  * GET /api/invoices/analytics
  */
 const getInvoiceAnalytics = asyncHandler(async (req, res) => {
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
   const { startDate, endDate } = req.query;
 
   const dateRange = startDate && endDate ? { startDate, endDate } : {};
@@ -559,7 +641,7 @@ const getInvoiceAnalytics = asyncHandler(async (req, res) => {
  * GET /api/invoices/dashboard
  */
 const getInvoiceDashboard = asyncHandler(async (req, res) => {
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
 
   // Get current month analytics
   const currentMonth = new Date();

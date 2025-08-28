@@ -9,7 +9,7 @@
 
 const { Invoice, PaymentTracking, InvoiceTemplate, PaymentReminder } = require('./model');
 const { Deal } = require('../deals/model');
-const { User } = require('../auth/model');
+const { User, CreatorProfile } = require('../auth/model');
 const { 
   successResponse, 
   errorResponse, 
@@ -32,88 +32,363 @@ const path = require('path');
 
 class InvoiceService {
   
-  /**
-   * Create Individual Invoice from Single Deal
-   * @param {Object} invoiceData - Invoice creation data
-   * @param {String} creatorId - Creator ID
-   * @returns {Object} Created invoice
-   */
-  async createIndividualInvoice(invoiceData, creatorId) {
-    try {
-      logInfo('Creating individual invoice', { creatorId, dealId: invoiceData.dealId });
+/**
+ * Create Individual Invoice from Single Deal - FIXED VERSION
+ * @param {Object} invoiceData - Invoice creation data
+ * @param {String} creatorId - Creator ID
+ * @returns {Object} Created invoice
+ */
+async createIndividualInvoice(invoiceData, creatorId) {
+  try {
+    logInfo('Creating individual invoice', { creatorId, dealId: invoiceData.dealId });
 
-      // Validate deal exists and belongs to creator
-      const deal = await Deal.findOne({ 
-        _id: invoiceData.dealId, 
-        creatorId,
-        status: { $in: ['completed', 'live', 'paid'] }
+    // === DEFENSIVE VALIDATION ===
+    
+    // Validate input parameters
+    if (!invoiceData || !invoiceData.dealId) {
+      logError('Invalid invoice data - missing dealId', { invoiceData });
+      throw new Error('Deal ID is required');
+    }
+
+    if (!creatorId) {
+      logError('Invalid creator ID - missing or empty', { creatorId });
+      throw new Error('Creator ID is required');
+    }
+
+    // First, check if deal exists at all (basic check)
+    const dealExists = await Deal.findById(invoiceData.dealId);
+    
+    if (!dealExists) {
+      logError('Deal not found in database', { dealId: invoiceData.dealId });
+      throw new Error(`Deal with ID ${invoiceData.dealId} does not exist`);
+    }
+
+    // Debug log to see the deal structure
+    logInfo('Deal found in database', { 
+      dealId: dealExists._id,
+      dealCreatorId: dealExists.creatorId,
+      dealUserId: dealExists.userId, // Alternative field name
+      dealCreatedBy: dealExists.createdBy, // Alternative field name
+      dealStatus: dealExists.status,
+      dealValue: dealExists.value,
+      dealPlatform: dealExists.platform,
+      dealKeys: Object.keys(dealExists.toObject()) // Show all fields in the deal
+    });
+
+    // FIXED: Safe creator ID validation with multiple possible field names
+    let dealOwnerField = null;
+    let dealOwnerId = null;
+
+    // Check for different possible creator field names
+    if (dealExists.creatorId) {
+      dealOwnerField = 'creatorId';
+      dealOwnerId = dealExists.creatorId;
+    } else if (dealExists.userId) {
+      dealOwnerField = 'userId';
+      dealOwnerId = dealExists.userId;
+    } else if (dealExists.createdBy) {
+      dealOwnerField = 'createdBy';
+      dealOwnerId = dealExists.createdBy;
+    } else {
+      logError('Deal has no owner field assigned', { 
+        dealId: invoiceData.dealId,
+        availableFields: Object.keys(dealExists.toObject()),
+        dealData: dealExists.toObject()
       });
+      throw new Error('Deal has no creator assigned. Please contact support to fix the deal data.');
+    }
 
-      if (!deal) {
+    logInfo('Found deal owner field', {
+      ownerField: dealOwnerField,
+      ownerId: dealOwnerId,
+      ownerIdType: typeof dealOwnerId
+    });
+
+    // Safe string comparison with null checks
+    const dealOwnerStr = dealOwnerId ? dealOwnerId.toString() : null;
+    const requestCreatorStr = creatorId ? creatorId.toString() : null;
+    
+    logInfo('Comparing creator IDs', {
+      dealOwner: dealOwnerStr,
+      requestCreator: requestCreatorStr,
+      match: dealOwnerStr === requestCreatorStr
+    });
+
+    if (!dealOwnerStr || !requestCreatorStr || dealOwnerStr !== requestCreatorStr) {
+      logError('Deal ownership mismatch', { 
+        dealId: invoiceData.dealId, 
+        dealOwner: dealOwnerStr, 
+        requestCreator: requestCreatorStr,
+        ownerField: dealOwnerField
+      });
+      throw new Error('Deal does not belong to this creator');
+    }
+
+    // Log current deal status for debugging
+    logInfo('Deal ownership verified, checking status', { 
+      dealId: invoiceData.dealId, 
+      currentStatus: dealExists.status,
+      hasInvoice: dealExists.hasInvoice 
+    });
+
+    // FIXED: More flexible deal status validation
+    const eligibleStatuses = [
+      'completed',    // Original - deal completed
+      'live',         // Original - deal is live
+      'paid',         // Original - deal is paid
+      'active',       // ADDED - active deals
+      'accepted',     // ADDED - accepted deals
+      'ongoing',      // ADDED - work in progress
+      'delivered',    // ADDED - work delivered
+      'approved',     // ADDED - client approved
+      'draft',        // ADDED - sometimes deals start as draft
+      'confirmed'     // ADDED - confirmed deals
+    ];
+
+    // Build the dynamic query based on which field we found
+    const dealQuery = {
+      _id: invoiceData.dealId,
+      status: { $in: eligibleStatuses }
+    };
+    
+    // Add the correct creator field to the query
+    dealQuery[dealOwnerField] = creatorId;
+
+    logInfo('Searching for deal with query', { dealQuery });
+
+    // Validate deal exists and belongs to creator with flexible status
+    const deal = await Deal.findOne(dealQuery);
+
+    if (!deal) {
+      // Provide specific error based on what failed
+      if (!eligibleStatuses.includes(dealExists.status)) {
+        logError('Deal status not eligible for invoicing', { 
+          dealId: invoiceData.dealId, 
+          currentStatus: dealExists.status,
+          eligibleStatuses 
+        });
+        throw new Error(`Deal status '${dealExists.status}' is not eligible for invoicing. Eligible statuses: ${eligibleStatuses.join(', ')}`);
+      } else {
+        logError('Deal query failed despite existing deal', { 
+          dealId: invoiceData.dealId,
+          ownerField: dealOwnerField
+        });
         throw new Error('Deal not found or not eligible for invoicing');
       }
+    }
 
-      // Check if invoice already exists for this deal
-      const existingInvoice = await Invoice.findOne({
-        'dealReferences.dealId': invoiceData.dealId,
-        creatorId,
-        status: { $ne: 'cancelled' }
+    // Check if invoice already exists for this deal
+    const existingInvoiceQuery = {
+      creatorId,
+      status: { $ne: 'cancelled' },
+      $or: [
+        { 'dealReferences.dealId': invoiceData.dealId },
+        { 'dealReferences.dealIds': invoiceData.dealId }
+      ]
+    };
+
+    const existingInvoice = await Invoice.findOne(existingInvoiceQuery);
+
+    if (existingInvoice) {
+      logError('Invoice already exists for deal', { 
+        dealId: invoiceData.dealId, 
+        existingInvoiceId: existingInvoice._id,
+        existingInvoiceNumber: existingInvoice.invoiceNumber 
       });
+      throw new Error(`Invoice already exists for this deal: ${existingInvoice.invoiceNumber}`);
+    }
 
-      if (existingInvoice) {
-        throw new Error('Invoice already exists for this deal');
+    // Get creator's tax preferences with defensive loading
+    let creator;
+    let creatorProfile;
+    
+    try {
+      creator = await User.findById(creatorId);
+      if (!creator) {
+        logError('Creator not found', { creatorId });
+        throw new Error('Creator not found');
       }
 
-      // Get creator's tax preferences
-      const creator = await User.findById(creatorId).populate('creatorProfile');
-      const taxPreferences = creator.creatorProfile?.taxPreferences || {};
-
-      // Build line items from deal deliverables
-      const lineItems = this.buildLineItemsFromDeal(deal);
-
-      // Create invoice object
-      const invoiceObj = {
-        invoiceType: 'individual',
-        creatorId,
-        dealReferences: {
-          dealId: invoiceData.dealId,
-          dealIds: [invoiceData.dealId],
-          consolidationCriteria: 'custom_selection',
-          dealsSummary: {
-            totalDeals: 1,
-            totalBrands: 1,
-            totalDeliverables: deal.deliverables?.length || 1,
-            platforms: [deal.platform]
-          }
-        },
-        clientDetails: this.buildClientDetailsFromDeal(deal, invoiceData.clientDetails),
-        lineItems,
-        taxSettings: this.buildTaxSettings(taxPreferences, invoiceData.taxSettings),
-        invoiceSettings: this.buildInvoiceSettings(invoiceData.invoiceSettings),
-        bankDetails: invoiceData.bankDetails || creator.creatorProfile?.bankDetails,
-        status: 'draft'
-      };
-
-      // Generate invoice number
-      const invoice = new Invoice(invoiceObj);
-      invoice.generateInvoiceNumber();
-
-      // Calculate amounts (pre-save hook will handle this)
-      await invoice.save();
-
-      logInfo('Individual invoice created successfully', { 
-        invoiceId: invoice._id, 
-        invoiceNumber: invoice.invoiceNumber,
-        amount: invoice.taxSettings.taxCalculation.finalAmount
+      // Try to get creator profile
+      creatorProfile = await CreatorProfile.findOne({ userId: creatorId });
+      logInfo('Retrieved creator and profile', { 
+        creatorId, 
+        hasCreator: !!creator,
+        hasProfile: !!creatorProfile 
       });
 
-      return invoice;
-
-    } catch (error) {
-      logError('Error creating individual invoice', { error: error.message, creatorId });
-      throw error;
+    } catch (loadError) {
+      logError('Error loading creator data', { creatorId, error: loadError.message });
+      throw new Error('Failed to load creator information');
     }
+
+    const taxPreferences = creatorProfile?.taxPreferences || {};
+    logInfo('Retrieved creator tax preferences', { 
+      creatorId, 
+      hasProfile: !!creatorProfile,
+      hasTaxPreferences: Object.keys(taxPreferences).length > 0,
+      applyGST: taxPreferences.applyGST,
+      applyTDS: taxPreferences.applyTDS
+    });
+
+    // Build line items from deal deliverables (with safety checks)
+    let lineItems;
+    try {
+      lineItems = this.buildLineItemsFromDeal(deal);
+      logInfo('Built line items from deal', { 
+        dealId: deal._id, 
+        lineItemCount: lineItems.length,
+        totalValue: deal.value 
+      });
+    } catch (lineItemError) {
+      logError('Error building line items', { dealId: deal._id, error: lineItemError.message });
+      throw new Error('Failed to build invoice line items from deal');
+    }
+
+    // Build client details (merge deal data with provided override)
+    let clientDetails;
+    try {
+      clientDetails = this.buildClientDetailsFromDeal(deal, invoiceData.clientDetails);
+      logInfo('Built client details', { 
+        dealId: deal._id,
+        clientName: clientDetails.name,
+        hasGST: !!clientDetails.taxInfo?.gstNumber,
+        hasPAN: !!clientDetails.taxInfo?.panNumber
+      });
+    } catch (clientError) {
+      logError('Error building client details', { dealId: deal._id, error: clientError.message });
+      throw new Error('Failed to build client details from deal');
+    }
+
+    // Build tax settings
+    let taxSettings;
+    try {
+      taxSettings = this.buildTaxSettings(taxPreferences, invoiceData.taxSettings);
+      logInfo('Built tax settings', { 
+        applyGST: taxSettings.gstSettings.applyGST,
+        applyTDS: taxSettings.tdsSettings.applyTDS,
+        gstRate: taxSettings.gstSettings.gstRate,
+        tdsRate: taxSettings.tdsSettings.tdsRate
+      });
+    } catch (taxError) {
+      logError('Error building tax settings', { error: taxError.message });
+      throw new Error('Failed to build tax settings');
+    }
+
+    // Build invoice settings
+    let invoiceSettings;
+    try {
+      invoiceSettings = this.buildInvoiceSettings(invoiceData.invoiceSettings);
+      logInfo('Built invoice settings', { 
+        currency: invoiceSettings.currency,
+        paymentTerms: invoiceSettings.paymentTerms,
+        discountValue: invoiceSettings.overallDiscount?.value || 0
+      });
+    } catch (settingsError) {
+      logError('Error building invoice settings', { error: settingsError.message });
+      throw new Error('Failed to build invoice settings');
+    }
+
+    // Create invoice object
+    const invoiceObj = {
+      invoiceType: 'individual',
+      creatorId,
+      dealReferences: {
+        dealId: invoiceData.dealId,
+        dealIds: [invoiceData.dealId],
+        consolidationCriteria: 'custom_selection',
+        dealsSummary: {
+          totalDeals: 1,
+          totalBrands: 1,
+          totalDeliverables: deal.deliverables?.length || 1,
+          platforms: [deal.platform]
+        }
+      },
+      clientDetails,
+      lineItems,
+      taxSettings,
+      invoiceSettings,
+      bankDetails: invoiceData.bankDetails || creatorProfile?.bankDetails || {},
+      status: 'draft'
+    };
+
+    logInfo('Created invoice object', { 
+      invoiceType: invoiceObj.invoiceType,
+      lineItemCount: invoiceObj.lineItems.length,
+      clientName: invoiceObj.clientDetails.name
+    });
+
+    // Create and save invoice
+    const invoice = new Invoice(invoiceObj);
+    
+    // Generate invoice number
+    try {
+      invoice.generateInvoiceNumber();
+      logInfo('Generated invoice number', { 
+        invoiceNumber: invoice.invoiceNumber 
+      });
+    } catch (numberError) {
+      logError('Error generating invoice number', { error: numberError.message });
+      throw new Error('Failed to generate invoice number');
+    }
+
+    // Save invoice (pre-save hook will calculate tax amounts)
+    try {
+      await invoice.save();
+      logInfo('Invoice saved to database', { 
+        invoiceId: invoice._id,
+        invoiceNumber: invoice.invoiceNumber 
+      });
+    } catch (saveError) {
+      logError('Error saving invoice to database', { error: saveError.message });
+      throw new Error('Failed to save invoice to database');
+    }
+
+    // Mark deal as invoiced using the correct field name
+    try {
+      const updateData = { 
+        hasInvoice: true, 
+        invoiceId: invoice._id,
+        invoiceNumber: invoice.invoiceNumber
+      };
+
+      await Deal.findByIdAndUpdate(invoiceData.dealId, updateData);
+      
+      logInfo('Updated deal with invoice reference', { 
+        dealId: invoiceData.dealId,
+        invoiceId: invoice._id 
+      });
+    } catch (updateError) {
+      logError('Failed to update deal with invoice reference', { 
+        dealId: invoiceData.dealId,
+        error: updateError.message 
+      });
+      // Don't throw here - invoice creation succeeded
+    }
+
+    logInfo('Individual invoice created successfully', { 
+      invoiceId: invoice._id, 
+      invoiceNumber: invoice.invoiceNumber,
+      dealId: deal._id,
+      clientName: invoice.clientDetails.name,
+      subtotal: invoice.taxSettings.taxCalculation.subtotal,
+      finalAmount: invoice.taxSettings.taxCalculation.finalAmount,
+      gstAmount: invoice.taxSettings.taxCalculation.gstAmount,
+      tdsAmount: invoice.taxSettings.taxCalculation.tdsAmount
+    });
+
+    return invoice;
+
+  } catch (error) {
+    logError('Error creating individual invoice', { 
+      error: error.message, 
+      creatorId, 
+      dealId: invoiceData?.dealId,
+      stack: error.stack 
+    });
+    throw error;
   }
+}
 
   /**
    * Create Consolidated Invoice from Multiple Deals - YOUR KEY REQUIREMENT
@@ -329,45 +604,139 @@ class InvoiceService {
     }).populate('brandProfile');
   }
 
-  /**
-   * Build Line Items from Single Deal
-   * @param {Object} deal - Deal object
-   * @returns {Array} Line items array
-   */
-  buildLineItemsFromDeal(deal) {
-    const lineItems = [];
+ /**
+ * Build Line Items from Single Deal - FIXED VERSION
+ * @param {Object} deal - Deal object
+ * @returns {Array} Line items array
+ */
+buildLineItemsFromDeal(deal) {
+  const lineItems = [];
+  
+  // Helper function to map deal deliverable types to invoice deliverable types
+  const mapDeliverableType = (dealType) => {
+    const mappings = {
+      'instagram_post': 'post',
+      'instagram_reel': 'reel',
+      'instagram_story': 'story',
+      'instagram_igtv': 'igtv',
+      'youtube_video': 'video',
+      'youtube_short': 'short',
+      'youtube_community_post': 'other',
+      'linkedin_post': 'post',
+      'linkedin_article': 'other',
+      'linkedin_video': 'video',
+      'twitter_post': 'post',
+      'twitter_thread': 'other',
+      'twitter_space': 'live',
+      'facebook_post': 'post',
+      'facebook_reel': 'reel',
+      'facebook_story': 'story',
+      'blog_post': 'other',
+      'podcast_mention': 'other',
+      'newsletter_mention': 'other',
+      'website_review': 'other',
+      'app_review': 'other',
+      'product_unboxing': 'video',
+      'brand_collaboration': 'other',
+      'event_coverage': 'other'
+    };
+    
+    return mappings[dealType] || 'other';
+  };
 
-    // Add deliverables as line items
-    if (deal.deliverables && deal.deliverables.length > 0) {
-      deal.deliverables.forEach(deliverable => {
-        lineItems.push({
-          description: `${deliverable.type} - ${deliverable.description}`,
-          dealId: deal._id,
-          itemType: 'content_creation',
-          platform: deal.platform,
-          deliverableType: deliverable.type,
-          quantity: deliverable.quantity || 1,
-          rate: deliverable.rate || (deal.value / deal.deliverables.length),
-          amount: deliverable.rate || (deal.value / deal.deliverables.length),
-          hsnCode: '998314'
-        });
-      });
-    } else {
-      // Single line item for the entire deal
+  // Get deal value - check multiple possible fields
+  const getDealValue = (deal) => {
+    if (deal.dealValue && typeof deal.dealValue.amount === 'number' && deal.dealValue.amount > 0) {
+      return deal.dealValue.amount;
+    }
+    if (deal.dealValue && typeof deal.dealValue.finalAmount === 'number' && deal.dealValue.finalAmount > 0) {
+      return deal.dealValue.finalAmount;
+    }
+    if (typeof deal.value === 'number' && deal.value > 0) {
+      return deal.value;
+    }
+    
+    // Log warning and return default value
+    logInfo('Warning: Could not determine deal value, using default', { 
+      dealId: deal._id,
+      dealValue: deal.dealValue,
+      value: deal.value 
+    });
+    return 5000; // Default fallback value
+  };
+
+  const totalDealValue = getDealValue(deal);
+
+  // Add deliverables as line items
+  if (deal.deliverables && deal.deliverables.length > 0) {
+    deal.deliverables.forEach((deliverable, index) => {
+      // Calculate rate - prioritize deliverable rate, fallback to proportional deal value
+      let itemRate = 0;
+      if (typeof deliverable.rate === 'number' && deliverable.rate > 0) {
+        itemRate = deliverable.rate;
+      } else {
+        // Distribute deal value proportionally across deliverables
+        itemRate = Math.round(totalDealValue / deal.deliverables.length);
+      }
+
+      const quantity = (typeof deliverable.quantity === 'number' && deliverable.quantity > 0) 
+        ? deliverable.quantity 
+        : 1;
+      
+      const amount = itemRate * quantity;
+
       lineItems.push({
-        description: `${deal.platform} Campaign - ${deal.brandProfile?.name || 'Brand Campaign'}`,
+        description: `${deliverable.type} - ${deliverable.description || 'Content Creation'}`,
         dealId: deal._id,
         itemType: 'content_creation',
         platform: deal.platform,
-        quantity: 1,
-        rate: deal.value,
-        amount: deal.value,
+        deliverableType: mapDeliverableType(deliverable.type), // Map to correct enum value
+        quantity: quantity,
+        rate: itemRate,
+        amount: amount,
         hsnCode: '998314'
       });
-    }
-
-    return lineItems;
+    });
+  } else {
+    // Single line item for the entire deal
+    lineItems.push({
+      description: `${deal.platform} Campaign - ${deal.brand?.name || deal.brandProfile?.name || 'Brand Campaign'}`,
+      dealId: deal._id,
+      itemType: 'content_creation',
+      platform: deal.platform,
+      deliverableType: 'other', // Safe default
+      quantity: 1,
+      rate: totalDealValue,
+      amount: totalDealValue,
+      hsnCode: '998314'
+    });
   }
+
+  // Validate line items before returning
+  const validatedLineItems = lineItems.map(item => {
+    // Ensure all numeric fields are valid numbers
+    const rate = (typeof item.rate === 'number' && !isNaN(item.rate)) ? item.rate : 0;
+    const quantity = (typeof item.quantity === 'number' && !isNaN(item.quantity)) ? item.quantity : 1;
+    const amount = (typeof item.amount === 'number' && !isNaN(item.amount)) ? item.amount : (rate * quantity);
+
+    return {
+      ...item,
+      rate,
+      quantity,
+      amount: amount || (rate * quantity) // Recalculate if amount is invalid
+    };
+  });
+
+  logInfo('Built line items from deal', { 
+    dealId: deal._id, 
+    lineItemCount: validatedLineItems.length,
+    totalValue: totalDealValue,
+    itemRates: validatedLineItems.map(item => item.rate),
+    itemAmounts: validatedLineItems.map(item => item.amount)
+  });
+
+  return validatedLineItems;
+}
 
   /**
    * Build Consolidated Line Items from Multiple Deals

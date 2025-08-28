@@ -10,6 +10,14 @@
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 
+
+// Clear any cached PaymentTracking model to avoid conflicts
+if (mongoose.models.PaymentTracking) {
+  delete mongoose.models.PaymentTracking;
+}
+if (mongoose.modelSchemas.PaymentTracking) {
+  delete mongoose.modelSchemas.PaymentTracking;
+}
 // ============================================
 // ENCRYPTION/DECRYPTION FUNCTIONS
 // ============================================
@@ -284,32 +292,44 @@ const invoiceSchema = new mongoose.Schema({
       country: { type: String, default: 'India', maxlength: 100 }
     },
     
-    // Tax registration details
-    taxInfo: {
-      gstNumber: {
-        type: String,
-        uppercase: true,
-        validate: {
-          validator: function(v) {
-            if (!v) return true;
-            return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}[Z]{1}[0-9A-Z]{1}$/.test(v);
-          },
-          message: 'Invalid GST number format'
+// Tax registration details - FIXED to be non-mandatory
+taxInfo: {
+  gstNumber: {
+    type: String,
+    uppercase: true,
+    default: null,
+    validate: {
+      validator: function(v) {
+        // Allow empty, null, undefined, or "N/A" values
+        if (!v || v === 'N/A' || v === 'NA' || v.trim() === '') {
+          return true;
         }
+        // Only validate format if a real value is provided
+        return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}[Z]{1}[0-9A-Z]{1}$/.test(v);
       },
-      panNumber: {
-        type: String,
-        uppercase: true,
-        validate: {
-          validator: function(v) {
-            if (!v) return true;
-            return /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(v);
-          },
-          message: 'Invalid PAN number format'
+      message: 'Invalid GST number format. Use valid GST format or leave empty.'
+    }
+  },
+  
+  panNumber: {
+    type: String,
+    uppercase: true,
+    default: null,
+    validate: {
+      validator: function(v) {
+        // Allow empty, null, undefined, or "N/A" values
+        if (!v || v === 'N/A' || v === 'NA' || v.trim() === '') {
+          return true;
         }
+        // Only validate format if a real value is provided
+        return /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(v);
       },
-      isInterstate: { type: Boolean, default: false }
-    },
+      message: 'Invalid PAN number format. Use valid PAN format or leave empty.'
+    }
+  },
+  
+  isInterstate: { type: Boolean, default: false }
+},
     
     // Client type for agencies
     clientType: {
@@ -528,7 +548,7 @@ const invoiceSchema = new mongoose.Schema({
     
     accountNumber: {
       type: String,
-      required: true,
+      //required: true,
       set: function(value) {
         return encrypt(value);
       },
@@ -539,13 +559,13 @@ const invoiceSchema = new mongoose.Schema({
     
     bankName: {
       type: String,
-      required: true,
+     // required: true,
       maxlength: 100
     },
     
     ifscCode: {
       type: String,
-      required: true,
+      //required: true,
       uppercase: true,
       validate: {
         validator: function(v) {

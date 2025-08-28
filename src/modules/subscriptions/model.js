@@ -14,7 +14,7 @@ const { encryptData, decryptData } = require('../../shared/utils');
 // PAYMENT TRACKING SCHEMA
 // ============================================
 
-const paymentTrackingSchema = new mongoose.Schema({
+const paymentTrackingSchema1 = new mongoose.Schema({
   // Reference to User
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -626,7 +626,7 @@ const subscriptionUpgradeSchema = new mongoose.Schema({
 // ============================================
 
 // Encrypt sensitive bank details before saving
-paymentTrackingSchema.pre('save', async function(next) {
+paymentTrackingSchema1.pre('save', async function(next) {
   if (this.isModified('bankDetails.accountNumber') && this.bankDetails.accountNumber) {
     this.bankDetails.accountNumber = encryptData(this.bankDetails.accountNumber);
   }
@@ -634,7 +634,7 @@ paymentTrackingSchema.pre('save', async function(next) {
 });
 
 // Decrypt bank details when retrieved
-paymentTrackingSchema.methods.getDecryptedBankDetails = function() {
+paymentTrackingSchema1.methods.getDecryptedBankDetails = function() {
   if (this.bankDetails.accountNumber) {
     return {
       ...this.bankDetails.toObject(),
@@ -645,13 +645,13 @@ paymentTrackingSchema.methods.getDecryptedBankDetails = function() {
 };
 
 // Check if payment is within verification time limit
-paymentTrackingSchema.methods.isWithinVerificationWindow = function() {
+paymentTrackingSchema1.methods.isWithinVerificationWindow = function() {
   const maxVerificationTime = 48 * 60 * 60 * 1000; // 48 hours
   return (Date.now() - this.createdAt.getTime()) <= maxVerificationTime;
 };
 
 // Calculate verification score based on details
-paymentTrackingSchema.methods.calculateVerificationScore = function() {
+paymentTrackingSchema1.methods.calculateVerificationScore = function() {
   let score = 0;
   
   // Amount match
@@ -675,13 +675,13 @@ paymentTrackingSchema.methods.calculateVerificationScore = function() {
 };
 
 // Virtual: Days since payment
-paymentTrackingSchema.virtual('daysSincePayment').get(function() {
+paymentTrackingSchema1.virtual('daysSincePayment').get(function() {
   if (!this.createdAt) return 0;
   return Math.floor((Date.now() - this.createdAt.getTime()) / (24 * 60 * 60 * 1000));
 });
 
 // Virtual: Verification urgency
-paymentTrackingSchema.virtual('verificationUrgency').get(function() {
+paymentTrackingSchema1.virtual('verificationUrgency').get(function() {
   const days = this.daysSincePayment;
   if (days >= 2) return 'urgent';
   if (days >= 1) return 'high';
@@ -833,11 +833,11 @@ subscriptionUpgradeSchema.virtual('estimatedProcessingTime').get(function() {
 // ============================================
 
 // Payment Tracking Indexes
-paymentTrackingSchema.index({ userId: 1, createdAt: -1 });
-paymentTrackingSchema.index({ paymentStatus: 1, createdAt: -1 });
-paymentTrackingSchema.index({ verificationStage: 1, flaggedForReview: 1 });
-paymentTrackingSchema.index({ 'upiDetails.transactionId': 1 });
-paymentTrackingSchema.index({ paymentMethod: 1, paymentStatus: 1 });
+paymentTrackingSchema1.index({ userId: 1, createdAt: -1 });
+paymentTrackingSchema1.index({ paymentStatus: 1, createdAt: -1 });
+paymentTrackingSchema1.index({ verificationStage: 1, flaggedForReview: 1 });
+paymentTrackingSchema1.index({ 'upiDetails.transactionId': 1 });
+paymentTrackingSchema1.index({ paymentMethod: 1, paymentStatus: 1 });
 
 // Billing Cycle Indexes
 billingCycleSchema.index({ userId: 1, cycleNumber: -1 });
@@ -855,7 +855,7 @@ subscriptionUpgradeSchema.index({ fromTier: 1, toTier: 1 });
 // ============================================
 
 // Find pending payments for verification
-paymentTrackingSchema.statics.findPendingVerifications = function(limit = 50) {
+paymentTrackingSchema1.statics.findPendingVerifications = function(limit = 50) {
   return this.find({
     paymentStatus: { $in: ['pending', 'under_review'] },
     verificationAttempts: { $lt: 3 }
@@ -915,12 +915,12 @@ billingCycleSchema.statics.findCyclesNeedingReminders = function() {
 // EXPORT MODELS
 // ============================================
 
-const PaymentTracking = mongoose.model('PaymentTracking', paymentTrackingSchema);
+const SubscriptionPayment = mongoose.model('PaymentTracking', paymentTrackingSchema1);
 const BillingCycle = mongoose.model('BillingCycle', billingCycleSchema);
 const SubscriptionUpgrade = mongoose.model('SubscriptionUpgrade', subscriptionUpgradeSchema);
 
 module.exports = {
-  PaymentTracking,
+  SubscriptionPayment,
   BillingCycle,
   SubscriptionUpgrade
 };

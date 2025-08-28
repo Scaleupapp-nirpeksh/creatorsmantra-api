@@ -1065,11 +1065,13 @@ dealSchema.methods.getDeliverableProgress = function() {
 
 // Virtual: Days since deal was created
 dealSchema.virtual('daysSinceCreated').get(function() {
+  if (!this.createdAt) return 0;
   return Math.floor((Date.now() - this.createdAt.getTime()) / (24 * 60 * 60 * 1000));
 });
 
 // Virtual: Deal age in appropriate units
 dealSchema.virtual('dealAge').get(function() {
+  if (!this.createdAt) return 'Unknown';
   const days = this.daysSinceCreated;
   if (days < 7) return `${days} days`;
   if (days < 30) return `${Math.floor(days / 7)} weeks`;
@@ -1089,7 +1091,7 @@ dealSchema.virtual('communicationCount').get(function() {
 
 // Virtual: Last communication date
 dealSchema.virtual('lastCommunication').get(function() {
-  if (this.communications.length === 0) return null;
+  if (!this.communications || this.communications.length === 0) return null;
   return this.communications[this.communications.length - 1].createdAt;
 });
 

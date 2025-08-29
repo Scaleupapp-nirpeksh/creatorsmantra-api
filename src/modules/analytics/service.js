@@ -18,7 +18,7 @@ const { Deal } = require('../deals/model');
 const { Invoice } = require('../invoices/model');
 const { Campaign } = require('../performance/model');
 const { Contract } = require('../contracts/model');
-const { Brief } = require('../briefs/model');
+const { Brief } = require('../briefs(not used)/model');
 const { RateCard } = require('../ratecards/model');
 
 // ============================================

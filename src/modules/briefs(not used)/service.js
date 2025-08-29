@@ -362,11 +362,14 @@ class BriefAnalyzerService {
   // ============================================
 
   /**
-   * Process AI Extraction for Brief
+   * Process AI Extraction for Brief with Retry Logic
    * @param {String} briefId - Brief ID
    * @returns {Object} AI extraction results
    */
   async processAIExtraction(briefId) {
+    const MAX_RETRIES = 2;
+    let retryCount = 0;
+    
     try {
       const brief = await Brief.findById(briefId);
       if (!brief) {
@@ -380,9 +383,31 @@ class BriefAnalyzerService {
       await brief.save();
 
       const startTime = Date.now();
+      let extractionResults;
 
-      // Perform AI extraction
-      const extractionResults = await this.performAIExtraction(brief.originalContent.rawText);
+      // Retry logic for AI extraction
+      while (retryCount <= MAX_RETRIES) {
+        try {
+          extractionResults = await this.performAIExtraction(brief.originalContent.rawText);
+          break; // Success, exit retry loop
+        } catch (aiError) {
+          retryCount++;
+          logWarn(`AI extraction attempt ${retryCount} failed`, { 
+            briefId, 
+            error: aiError.message,
+            retryCount,
+            maxRetries: MAX_RETRIES
+          });
+          
+          if (retryCount > MAX_RETRIES) {
+            throw aiError; // Final attempt failed, throw error
+          }
+          
+          // Wait before retry (exponential backoff)
+          const delay = Math.pow(2, retryCount) * 1000; // 2s, 4s, 8s...
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
 
       // Calculate processing metrics
       const processingTime = Date.now() - startTime;
@@ -397,7 +422,8 @@ class BriefAnalyzerService {
           tokensUsed: extractionResults.tokensUsed || 0,
           processingTime,
           confidenceScore: extractionResults.confidenceScore || 85,
-          extractionVersion: '1.0'
+          extractionVersion: '1.0',
+          retryCount
         }
       };
 
@@ -417,17 +443,24 @@ class BriefAnalyzerService {
       logInfo('AI extraction completed successfully', { 
         briefId, 
         processingTime,
-        deliverables: extractionResults.deliverables.length 
+        deliverables: extractionResults.deliverables.length,
+        retryCount
       });
 
       return brief.aiExtraction;
 
     } catch (error) {
-      logError('AI extraction failed', { briefId, error: error.message });
+      logError('AI extraction failed after all retries', { 
+        briefId, 
+        error: error.message,
+        retryCount 
+      });
       
       // Update brief status to failed
       await Brief.findByIdAndUpdate(briefId, {
-        'aiExtraction.status': 'failed'
+        'aiExtraction.status': 'failed',
+        'aiExtraction.processingMetadata.retryCount': retryCount,
+        'aiExtraction.processingMetadata.lastError': error.message
       });
       
       throw error;
@@ -477,158 +510,362 @@ class BriefAnalyzerService {
     }
   }
 
-  /**
+/**
    * Build AI Extraction Prompt
    * @param {String} briefText - Raw brief text
    * @returns {String} Formatted prompt
    */
-  buildExtractionPrompt(briefText) {
-    return `
-Analyze this brand collaboration brief and extract the following information. Return ONLY valid JSON.
+buildExtractionPrompt(briefText) {
+  return `
+Analyze this brand collaboration brief and extract information.
+
+CRITICAL INSTRUCTIONS:
+- Return ONLY valid JSON with no markdown formatting
+- Do NOT wrap JSON in code blocks or backticks
+- Do NOT include explanatory text before or after JSON
+- Your entire response must be parseable as JSON
 
 BRIEF TEXT:
 """
 ${briefText}
 """
 
-Extract and return this exact JSON structure:
+Return this EXACT JSON structure with actual values:
 
 {
-  "brandInfo": {
-    "name": "Brand name if mentioned",
-    "contactPerson": "Contact person name if mentioned",
-    "email": "Email if mentioned",
-    "company": "Company name if different from brand"
-  },
-  "campaignInfo": {
-    "name": "Campaign/project name if mentioned",
-    "type": "Campaign type (product launch, awareness, etc.)",
-    "description": "Brief campaign description"
-  },
-  "deliverables": [
+"brandInfo": {
+  "name": "Extract brand name or empty string",
+  "contactPerson": "Extract contact person or empty string", 
+  "email": "Extract email or empty string",
+  "company": "Extract company name or empty string"
+},
+"campaignInfo": {
+  "name": "Extract campaign name or empty string",
+  "type": "Extract campaign type or empty string", 
+  "description": "Extract campaign description or empty string"
+},
+"deliverables": [
+  {
+    "type": "instagram_post",
+    "quantity": 1,
+    "description": "Description of deliverable",
+    "duration": "For video content only",
+    "requirements": ["List specific requirements"],
+    "platform": "Platform name",
+    "estimatedValue": 10000
+  }
+],
+"timeline": {
+  "briefDate": "2024-12-01",
+  "contentDeadline": "2024-12-15",
+  "postingStartDate": "2024-12-20",
+  "postingEndDate": "2024-12-25",
+  "campaignDuration": "5 days",
+  "isUrgent": false
+},
+"budget": {
+  "mentioned": true,
+  "amount": 50000,
+  "currency": "INR",
+  "isRange": false,
+  "minAmount": 0,
+  "maxAmount": 0,
+  "paymentTerms": "Payment terms if mentioned",
+  "advancePercentage": 50
+},
+"brandGuidelines": {
+  "hashtags": ["#hashtag1", "#hashtag2"],
+  "mentions": ["@brand", "@mention"],
+  "brandColors": ["#FF0000", "#00FF00"],
+  "brandTone": "Professional/Casual/Fun etc",
+  "keyMessages": ["Key message 1", "Key message 2"],
+  "restrictions": ["Don't wear red", "Avoid competitor mentions"],
+  "styling": "Visual style requirements"
+},
+"usageRights": {
+  "duration": "6 months",
+  "scope": ["organic", "paid"],
+  "territory": "India",
+  "isPerpetual": false,
+  "exclusivity": {
+    "required": true,
+    "duration": "3 months", 
+    "scope": "Category exclusivity"
+  }
+},
+"contentRequirements": {
+  "revisionRounds": 2,
+  "approvalProcess": "Brand approval required",
+  "contentFormat": ["MP4", "JPG"],
+  "qualityGuidelines": ["4K resolution", "Professional lighting"],
+  "technicalSpecs": {
+    "resolution": "1080p",
+    "aspectRatio": "16:9",
+    "fileFormat": ["MP4", "MOV"]
+  }
+},
+"missingInfo": [
+  {
+    "category": "budget",
+    "description": "Budget amount not specified",
+    "importance": "critical"
+  }
+],
+"riskAssessment": {
+  "overallRisk": "medium",
+  "riskFactors": [
     {
-      "type": "instagram_post|instagram_reel|instagram_story|youtube_video|youtube_shorts|linkedin_post|twitter_post|blog_post|other",
-      "quantity": number,
-      "description": "Detailed description",
-      "duration": "Duration for video content",
-      "requirements": ["List of specific requirements"],
-      "platform": "Platform name",
-      "estimatedValue": number_in_rupees
+      "type": "Timeline Risk",
+      "description": "Tight deadline",
+      "severity": "medium"
     }
-  ],
-  "timeline": {
-    "briefDate": "YYYY-MM-DD if mentioned",
-    "contentDeadline": "YYYY-MM-DD if mentioned",
-    "postingStartDate": "YYYY-MM-DD if mentioned", 
-    "postingEndDate": "YYYY-MM-DD if mentioned",
-    "isUrgent": boolean
-  },
-  "budget": {
-    "mentioned": boolean,
-    "amount": number_in_rupees,
-    "isRange": boolean,
-    "minAmount": number_if_range,
-    "maxAmount": number_if_range,
-    "paymentTerms": "Payment terms if mentioned"
-  },
-  "brandGuidelines": {
-    "hashtags": ["List of hashtags mentioned"],
-    "mentions": ["List of mentions required"],
-    "brandColors": ["List of brand colors if mentioned"],
-    "keyMessages": ["Key messages to include"],
-    "restrictions": ["Things to avoid or restrictions"]
-  },
-  "usageRights": {
-    "duration": "Usage duration if mentioned",
-    "scope": ["organic", "paid", "cross-platform"],
-    "isPerpetual": boolean,
-    "exclusivity": {
-      "required": boolean,
-      "duration": "Exclusivity duration",
-      "scope": "Exclusivity scope"
-    }
-  },
-  "missingInfo": [
-    {
-      "category": "budget|timeline|usage_rights|exclusivity|payment_terms|content_specs|brand_guidelines|contact_info|deliverables|approval_process",
-      "description": "What specific information is missing",
-      "importance": "critical|important|nice_to_have"
-    }
-  ],
-  "riskAssessment": {
-    "overallRisk": "low|medium|high",
-    "riskFactors": [
-      {
-        "type": "Risk type",
-        "description": "Risk description",
-        "severity": "low|medium|high"
-      }
-    ]
-  },
-  "confidenceScore": number_between_0_and_100
+  ]
+},
+"confidenceScore": 85
 }
 
 IMPORTANT RULES:
-1. Be conservative with estimated values - use market rates for Indian creators
-2. Flag missing critical information like budget, timeline, usage rights
-3. Identify any risky clauses like perpetual usage or long exclusivity
-4. For deliverable values, use these rough guidelines:
-   - Instagram Post: ₹5,000-50,000 (based on follower count context)
-   - Instagram Reel: ₹10,000-100,000
-   - Instagram Story: ₹2,000-20,000
-   - YouTube Video: ₹25,000-500,000
-   - YouTube Shorts: ₹5,000-50,000
-5. Mark timeline as urgent if phrases like "ASAP", "urgent", "next week" appear
-6. Always return valid JSON only, no additional text
-`;
-  }
 
-  /**
+1. For "category" in missingInfo, use ONLY ONE of these values:
+ - "budget"
+ - "timeline" 
+ - "usage_rights"
+ - "exclusivity"
+ - "payment_terms"
+ - "content_specs"
+ - "brand_guidelines"
+ - "contact_info"
+ - "deliverables"
+ - "approval_process"
+
+2. For deliverable "type", use ONLY ONE of these values:
+ - "instagram_post"
+ - "instagram_reel"
+ - "instagram_story"
+ - "youtube_video"
+ - "youtube_shorts"
+ - "linkedin_post"
+ - "twitter_post"
+ - "blog_post"
+ - "other"
+
+3. For "importance", use ONLY ONE of these values:
+ - "critical"
+ - "important" 
+ - "nice_to_have"
+
+4. For "overallRisk" and "severity", use ONLY:
+ - "low"
+ - "medium"
+ - "high"
+
+5. Use null for missing dates, empty strings for missing text, empty arrays for missing lists, 0 for missing numbers
+
+6. Estimate values conservatively for Indian market:
+ - Instagram Post: ₹5,000-50,000
+ - Instagram Reel: ₹10,000-100,000  
+ - Instagram Story: ₹2,000-20,000
+ - YouTube Video: ₹25,000-500,000
+ - YouTube Shorts: ₹5,000-50,000
+
+7. Return ONLY the JSON object - no additional text
+`;
+}
+
+ /**
    * Post-process AI Extraction Results
    * @param {Object} rawData - Raw AI extraction data
    * @returns {Object} Processed data
    */
-  postProcessExtractionResults(rawData) {
-    try {
-      // Validate and sanitize deliverables
-      const deliverables = rawData.deliverables.map(deliverable => ({
-        ...deliverable,
-        quantity: Math.max(1, deliverable.quantity || 1),
-        estimatedValue: Math.max(0, deliverable.estimatedValue || 0),
-        requirements: Array.isArray(deliverable.requirements) ? deliverable.requirements : []
-      }));
+ postProcessExtractionResults(rawData) {
+  try {
+    // Validate and sanitize deliverables
+    const deliverables = (rawData.deliverables || []).map(deliverable => ({
+      type: deliverable.type || 'other',
+      quantity: Math.max(1, deliverable.quantity || 1),
+      description: deliverable.description || '',
+      duration: deliverable.duration || '',
+      requirements: Array.isArray(deliverable.requirements) ? deliverable.requirements : [],
+      platform: deliverable.platform || '',
+      estimatedValue: Math.max(0, deliverable.estimatedValue || 0)
+    }));
 
-      // Ensure missing info has proper structure
-      const missingInfo = (rawData.missingInfo || []).map(info => ({
-        category: info.category,
-        description: info.description,
+    // Ensure brand info has proper structure
+    const brandInfo = {
+      name: rawData.brandInfo?.name || '',
+      contactPerson: rawData.brandInfo?.contactPerson || '',
+      email: rawData.brandInfo?.email || '',
+      phone: rawData.brandInfo?.phone || '',
+      company: rawData.brandInfo?.company || ''
+    };
+
+    // Ensure campaign info has proper structure
+    const campaignInfo = {
+      name: rawData.campaignInfo?.name || '',
+      type: rawData.campaignInfo?.type || '',
+      description: rawData.campaignInfo?.description || ''
+    };
+
+    // Ensure timeline has proper structure
+    const timeline = {
+      briefDate: rawData.timeline?.briefDate ? new Date(rawData.timeline.briefDate) : null,
+      contentDeadline: rawData.timeline?.contentDeadline ? new Date(rawData.timeline.contentDeadline) : null,
+      postingStartDate: rawData.timeline?.postingStartDate ? new Date(rawData.timeline.postingStartDate) : null,
+      postingEndDate: rawData.timeline?.postingEndDate ? new Date(rawData.timeline.postingEndDate) : null,
+      campaignDuration: rawData.timeline?.campaignDuration || '',
+      isUrgent: rawData.timeline?.isUrgent || false
+    };
+
+    // Ensure budget has proper structure
+    const budget = {
+      mentioned: rawData.budget?.mentioned || false,
+      amount: rawData.budget?.amount || 0,
+      currency: rawData.budget?.currency || 'INR',
+      isRange: rawData.budget?.isRange || false,
+      minAmount: rawData.budget?.minAmount || 0,
+      maxAmount: rawData.budget?.maxAmount || 0,
+      paymentTerms: rawData.budget?.paymentTerms || '',
+      advancePercentage: rawData.budget?.advancePercentage || 0
+    };
+
+    // Ensure brand guidelines has proper structure
+    const brandGuidelines = {
+      hashtags: Array.isArray(rawData.brandGuidelines?.hashtags) ? rawData.brandGuidelines.hashtags : [],
+      mentions: Array.isArray(rawData.brandGuidelines?.mentions) ? rawData.brandGuidelines.mentions : [],
+      brandColors: Array.isArray(rawData.brandGuidelines?.brandColors) ? rawData.brandGuidelines.brandColors : [],
+      brandTone: rawData.brandGuidelines?.brandTone || '',
+      keyMessages: Array.isArray(rawData.brandGuidelines?.keyMessages) ? rawData.brandGuidelines.keyMessages : [],
+      restrictions: Array.isArray(rawData.brandGuidelines?.restrictions) ? rawData.brandGuidelines.restrictions : [],
+      styling: rawData.brandGuidelines?.styling || ''
+    };
+
+    // Ensure usage rights has proper structure
+    const usageRights = {
+      duration: rawData.usageRights?.duration || '',
+      scope: Array.isArray(rawData.usageRights?.scope) ? rawData.usageRights.scope : [],
+      territory: rawData.usageRights?.territory || '',
+      isPerpetual: rawData.usageRights?.isPerpetual || false,
+      exclusivity: {
+        required: rawData.usageRights?.exclusivity?.required || false,
+        duration: rawData.usageRights?.exclusivity?.duration || '',
+        scope: rawData.usageRights?.exclusivity?.scope || ''
+      }
+    };
+
+    // Ensure content requirements has proper structure
+    const contentRequirements = {
+      revisionRounds: rawData.contentRequirements?.revisionRounds || 0,
+      approvalProcess: rawData.contentRequirements?.approvalProcess || '',
+      contentFormat: Array.isArray(rawData.contentRequirements?.contentFormat) 
+        ? rawData.contentRequirements.contentFormat 
+        : [],
+      qualityGuidelines: Array.isArray(rawData.contentRequirements?.qualityGuidelines) 
+        ? rawData.contentRequirements.qualityGuidelines 
+        : [],
+      technicalSpecs: {
+        resolution: rawData.contentRequirements?.technicalSpecs?.resolution || '',
+        aspectRatio: rawData.contentRequirements?.technicalSpecs?.aspectRatio || '',
+        fileFormat: Array.isArray(rawData.contentRequirements?.technicalSpecs?.fileFormat) 
+          ? rawData.contentRequirements.technicalSpecs.fileFormat 
+          : []
+      }
+    };
+
+    // Valid categories for missing info
+    const validCategories = [
+      'budget', 'timeline', 'usage_rights', 'exclusivity', 
+      'payment_terms', 'content_specs', 'brand_guidelines', 
+      'contact_info', 'deliverables', 'approval_process'
+    ];
+
+    // Process missing info with proper category validation
+    const missingInfo = (rawData.missingInfo || []).map(info => {
+      let category = 'other'; // Default fallback
+      
+      // Extract valid category from the response
+      if (typeof info.category === 'string') {
+        const lowerCategory = info.category.toLowerCase();
+        
+        // Check if it matches any valid category
+        const matchedCategory = validCategories.find(validCat => 
+          lowerCategory.includes(validCat.replace('_', ' ')) || 
+          lowerCategory.includes(validCat)
+        );
+        
+        if (matchedCategory) {
+          category = matchedCategory;
+        } else if (validCategories.includes(lowerCategory)) {
+          category = lowerCategory;
+        }
+      }
+
+      return {
+        category,
+        description: info.description || 'Missing information',
         importance: ['critical', 'important', 'nice_to_have'].includes(info.importance) 
           ? info.importance 
           : 'important'
-      }));
-
-      // Calculate overall risk
-      const riskFactors = rawData.riskAssessment?.riskFactors || [];
-      const highRiskCount = riskFactors.filter(factor => factor.severity === 'high').length;
-      const overallRisk = highRiskCount > 0 ? 'high' 
-        : riskFactors.length > 2 ? 'medium' 
-        : 'low';
-
-      return {
-        ...rawData,
-        deliverables,
-        missingInfo,
-        riskAssessment: {
-          ...rawData.riskAssessment,
-          overallRisk
-        }
       };
+    }).filter(info => info.category !== 'other'); // Remove invalid categories
 
-    } catch (error) {
-      logError('Error post-processing AI results', { error: error.message });
-      throw error;
+    // Process risk factors
+    const riskFactors = (rawData.riskAssessment?.riskFactors || []).map(factor => ({
+      type: factor.type || 'Unknown',
+      description: factor.description || '',
+      severity: ['low', 'medium', 'high'].includes(factor.severity) ? factor.severity : 'low'
+    }));
+
+    // Calculate overall risk
+    const highRiskCount = riskFactors.filter(factor => factor.severity === 'high').length;
+    const mediumRiskCount = riskFactors.filter(factor => factor.severity === 'medium').length;
+    
+    let overallRisk = 'low';
+    if (highRiskCount > 0) {
+      overallRisk = 'high';
+    } else if (mediumRiskCount > 1 || riskFactors.length > 3) {
+      overallRisk = 'medium';
     }
+
+    // Ensure risk assessment has proper structure
+    const riskAssessment = {
+      overallRisk,
+      riskFactors
+    };
+
+    // Return processed data with all required fields
+    return {
+      brandInfo,
+      campaignInfo,
+      deliverables,
+      timeline,
+      budget,
+      brandGuidelines,
+      usageRights,
+      contentRequirements,
+      missingInfo,
+      riskAssessment,
+      confidenceScore: Math.min(100, Math.max(0, rawData.confidenceScore || 85))
+    };
+
+  } catch (error) {
+    logError('Error post-processing AI results', { error: error.message });
+    
+    // Return minimal valid structure if processing fails
+    return {
+      brandInfo: { name: '', contactPerson: '', email: '', phone: '', company: '' },
+      campaignInfo: { name: '', type: '', description: '' },
+      deliverables: [],
+      timeline: { briefDate: null, contentDeadline: null, postingStartDate: null, postingEndDate: null, campaignDuration: '', isUrgent: false },
+      budget: { mentioned: false, amount: 0, currency: 'INR', isRange: false, minAmount: 0, maxAmount: 0, paymentTerms: '', advancePercentage: 0 },
+      brandGuidelines: { hashtags: [], mentions: [], brandColors: [], brandTone: '', keyMessages: [], restrictions: [], styling: '' },
+      usageRights: { duration: '', scope: [], territory: '', isPerpetual: false, exclusivity: { required: false, duration: '', scope: '' } },
+      contentRequirements: { revisionRounds: 0, approvalProcess: '', contentFormat: [], qualityGuidelines: [], technicalSpecs: { resolution: '', aspectRatio: '', fileFormat: [] } },
+      missingInfo: [{ category: 'deliverables', description: 'AI processing failed - manual review required', importance: 'critical' }],
+      riskAssessment: { overallRisk: 'high', riskFactors: [{ type: 'Processing Error', description: 'AI extraction failed', severity: 'high' }] },
+      confidenceScore: 0
+    };
   }
+}
 
   // ============================================
   // CLARIFICATION MANAGEMENT
@@ -998,6 +1235,9 @@ ${creatorName}`;
    */
   async checkSubscriptionLimits(creatorId, action) {
     try {
+
+      console.log('Debug - User model:', !!User, typeof User);
+      console.log('Debug - creatorId:', creatorId, typeof creatorId);
       const user = await User.findById(creatorId);
       if (!user) {
         throw new Error('User not found');

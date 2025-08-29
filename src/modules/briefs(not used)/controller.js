@@ -28,7 +28,7 @@ const {
  */
 const createTextBrief = asyncHandler(async (req, res) => {
   const { rawText, notes, tags } = req.body;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
 
   logInfo('Creating text brief', { creatorId, textLength: rawText?.length });
 
@@ -66,7 +66,7 @@ const createFileBrief = asyncHandler(async (req, res) => {
     );
   }
 
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id;
   const fileData = {
     ...req.file,
     subscriptionTier: req.user.subscriptionTier
@@ -106,7 +106,7 @@ const createFileBrief = asyncHandler(async (req, res) => {
  */
 const getBriefById = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   const brief = await BriefAnalyzerService.getBriefById(briefId, creatorId);
 
@@ -132,7 +132,7 @@ const getBriefById = asyncHandler(async (req, res) => {
  * GET /api/briefs
  */
 const getCreatorBriefs = asyncHandler(async (req, res) => {
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
   const filters = {
     status: req.query.status,
     inputType: req.query.inputType,
@@ -158,7 +158,7 @@ const getCreatorBriefs = asyncHandler(async (req, res) => {
  */
 const getBriefsByStatus = asyncHandler(async (req, res) => {
   const { status } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   const briefs = await Brief.getByStatus(creatorId, status);
 
@@ -183,7 +183,7 @@ const getBriefsByStatus = asyncHandler(async (req, res) => {
  * GET /api/briefs/dashboard/stats
  */
 const getDashboardStats = asyncHandler(async (req, res) => {
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   const stats = await BriefAnalyzerService.getDashboardStats(creatorId);
 
@@ -204,7 +204,7 @@ const getDashboardStats = asyncHandler(async (req, res) => {
  */
 const updateBrief = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
   const updateData = req.body;
 
   logInfo('Updating brief', { briefId, creatorId, updates: Object.keys(updateData) });
@@ -230,7 +230,7 @@ const updateBrief = asyncHandler(async (req, res) => {
 const updateBriefStatus = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
   const { status } = req.body;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   logInfo('Updating brief status', { briefId, newStatus: status });
 
@@ -253,7 +253,7 @@ const updateBriefStatus = asyncHandler(async (req, res) => {
 const updateCreatorNotes = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
   const { notes } = req.body;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   const updatedBrief = await BriefAnalyzerService.updateBrief(briefId, { creatorNotes: notes }, creatorId);
 
@@ -272,7 +272,7 @@ const updateCreatorNotes = asyncHandler(async (req, res) => {
 const updateBriefTags = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
   const { tags } = req.body;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   const updatedBrief = await BriefAnalyzerService.updateBrief(briefId, { tags }, creatorId);
 
@@ -294,7 +294,7 @@ const updateBriefTags = asyncHandler(async (req, res) => {
  */
 const triggerAIExtraction = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   logInfo('Manually triggering AI extraction', { briefId, creatorId });
 
@@ -326,7 +326,7 @@ const triggerAIExtraction = asyncHandler(async (req, res) => {
  */
 const getExtractionStatus = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   const brief = await Brief.findOne({
     _id: briefId,
@@ -361,7 +361,7 @@ const getExtractionStatus = asyncHandler(async (req, res) => {
  */
 const generateClarificationEmail = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   logInfo('Generating clarification email', { briefId });
 
@@ -388,7 +388,7 @@ const generateClarificationEmail = asyncHandler(async (req, res) => {
 const addClarificationQuestion = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
   const { question } = req.body;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   const brief = await Brief.findOne({
     _id: briefId,
@@ -427,7 +427,7 @@ const addClarificationQuestion = asyncHandler(async (req, res) => {
 const answerClarificationQuestion = asyncHandler(async (req, res) => {
   const { briefId, questionId } = req.params;
   const { answer } = req.body;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   const brief = await Brief.findOne({
     _id: briefId,
@@ -491,7 +491,7 @@ const answerClarificationQuestion = asyncHandler(async (req, res) => {
  */
 const convertToDeal = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
   const dealOverrides = req.body || {};
 
   logInfo('Converting brief to deal', { briefId, creatorId, hasOverrides: Object.keys(dealOverrides).length > 0 });
@@ -522,7 +522,7 @@ const convertToDeal = asyncHandler(async (req, res) => {
  */
 const getDealPreview = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   const brief = await Brief.findOne({
     _id: briefId,
@@ -573,7 +573,7 @@ const getDealPreview = asyncHandler(async (req, res) => {
  */
 const deleteBrief = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   logInfo('Deleting brief', { briefId, creatorId });
 
@@ -641,7 +641,7 @@ const getBriefMetadata = asyncHandler(async (req, res) => {
  * POST /api/briefs/search
  */
 const searchBriefs = asyncHandler(async (req, res) => {
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
   const {
     query,
     filters = {},
@@ -674,7 +674,7 @@ const searchBriefs = asyncHandler(async (req, res) => {
  * PATCH /api/briefs/bulk-update
  */
 const bulkUpdateBriefs = asyncHandler(async (req, res) => {
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
   const { briefIds, updateData } = req.body;
 
   logInfo('Bulk updating briefs', { creatorId, briefCount: briefIds.length });
@@ -708,7 +708,7 @@ const bulkUpdateBriefs = asyncHandler(async (req, res) => {
  */
 const getBriefSummary = asyncHandler(async (req, res) => {
   const { briefId } = req.params;
-  const creatorId = req.user.userId;
+  const creatorId = req.user.id
 
   const brief = await Brief.findOne({
     _id: briefId,

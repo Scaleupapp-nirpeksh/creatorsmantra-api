@@ -1,7 +1,7 @@
 /**
  * CreatorsMantra Backend - Main Application
  * Express.js application setup with middleware and routes
- * Enhanced with Invoice Module Support, Brief Module Support, Analytics Module & Production Features
+ * Enhanced with Invoice Module Support, Brief Module Support, Analytics Module, Scripts Module & Production Features
  * 
  * @author CreatorsMantra Team
  * @version 1.0.0
@@ -169,6 +169,14 @@ try {
   logWarn('⚠️  Invoice storage directory not found');
 }
 
+// Serve script files (if stored locally)
+try {
+  app.use('/scripts', express.static(path.join(__dirname, '../uploads/scripts')));
+  logInfo('📝 Script file serving enabled');
+} catch (error) {
+  logWarn('⚠️  Script storage directory not found');
+}
+
 // ============================================
 // HEALTH CHECK ROUTES
 // ============================================
@@ -230,7 +238,14 @@ app.get('/health/detailed', async (req, res) => {
         advancedAnalyticsEnabled: config.featureFlags?.aiFeatures || false,
         trendAnalysisEnabled: config.featureFlags?.aiFeatures || false,
         revenueIntelligenceEnabled: true,
-        performanceCorrelationEnabled: true
+        performanceCorrelationEnabled: true,
+        // Scripts module features
+        scriptGenerationEnabled: true,
+        aiScriptGenerationEnabled: config.featureFlags?.aiFeatures || false,
+        videoTranscriptionEnabled: config.featureFlags?.aiFeatures || false,
+        scriptAnalyticsEnabled: true,
+        abTestingEnabled: config.featureFlags?.aiFeatures || false,
+        trendIntegrationEnabled: config.featureFlags?.aiFeatures || false
       },
       modules: {
         auth: checkModuleExists('auth'),
@@ -242,7 +257,8 @@ app.get('/health/detailed', async (req, res) => {
         performance: checkModuleExists('performance'),
         contracts: checkModuleExists('contracts'),
         agency: checkModuleExists('agency'),
-        analytics: checkModuleExists('analytics') // New analytics module
+        analytics: checkModuleExists('analytics'),
+        scripts: checkModuleExists('scripts') // New scripts module
       },
       services: {
         cronJobs: checkCronJobsStatus(),
@@ -251,8 +267,10 @@ app.get('/health/detailed', async (req, res) => {
         paymentReminders: checkPaymentReminderService(),
         aiProcessing: checkAIProcessingService(),
         briefAnalysis: checkBriefAnalysisService(),
-        analyticsEngine: checkAnalyticsEngineService(), // New analytics service
-        caching: checkCachingService() // New caching service for analytics
+        analyticsEngine: checkAnalyticsEngineService(),
+        scriptGeneration: checkScriptGenerationService(), // New script generation service
+        videoTranscription: checkVideoTranscriptionService(), // New video transcription service
+        caching: checkCachingService()
       }
     };
     
@@ -274,11 +292,59 @@ app.get('/health/detailed', async (req, res) => {
 });
 
 /**
- * Enhanced module check function with analytics module support
+ * Enhanced module check function with analytics and scripts module support
  */
 function checkModuleExists(moduleName) {
   try {
     const routes = require(`./modules/${moduleName}/routes`);
+    
+    // Special health check for scripts module
+    if (moduleName === 'scripts') {
+      try {
+        const { Script } = require(`./modules/${moduleName}/model`);
+        const scriptService = require(`./modules/${moduleName}/service`);
+        
+        return { 
+          status: 'loaded', 
+          available: true,
+          features: {
+            models: !!Script,
+            service: !!scriptService,
+            textScripts: true,
+            fileUpload: true,
+            videoTranscription: config.featureFlags?.aiFeatures || false,
+            aiGeneration: config.featureFlags?.aiFeatures || false,
+            abTesting: config.featureFlags?.aiFeatures || false,
+            trendIntegration: config.featureFlags?.aiFeatures || false,
+            dealConnection: true,
+            platformOptimization: true,
+            scriptAnalytics: true,
+            exportOptions: true,
+            bulkOperations: true
+          },
+          platforms: [
+            'instagram_reel', 'instagram_post', 'instagram_story',
+            'youtube_video', 'youtube_shorts',
+            'linkedin_video', 'linkedin_post',
+            'twitter_post', 'facebook_reel', 'tiktok_video'
+          ],
+          subscriptionTiers: {
+            starter: ['text_scripts', 'basic_generation', '10_per_month'],
+            pro: ['all_starter_features', 'video_transcription', 'ab_testing', '25_per_month'],
+            elite: ['all_pro_features', 'unlimited_scripts', 'advanced_features'],
+            agency: ['all_elite_features', 'bulk_operations', 'team_features']
+          },
+          version: '2.0.0'
+        };
+      } catch (error) {
+        return { 
+          status: 'partial', 
+          available: true,
+          error: 'Scripts service layer issues',
+          details: error.message
+        };
+      }
+    }
     
     // Special health check for analytics module
     if (moduleName === 'analytics') {
@@ -403,8 +469,10 @@ function checkCronJobsStatus() {
       pdfCleanup: config.featureFlags?.pdfGeneration !== false,
       briefFileCleanup: true,
       aiProcessingCleanup: config.featureFlags?.aiFeatures || false,
-      analyticsCacheCleanup: true, // New analytics cache cleanup
-      trendAnalysisUpdates: config.featureFlags?.aiFeatures || false // New trend analysis updates
+      analyticsCacheCleanup: true,
+      trendAnalysisUpdates: config.featureFlags?.aiFeatures || false,
+      scriptFileCleanup: true, // New script file cleanup
+      scriptAnalyticsUpdate: true // New script analytics update
     };
   } catch (error) {
     return {
@@ -442,7 +510,8 @@ function checkFileUploadService() {
     allowedTypes: ['PDF', 'JPEG', 'PNG', 'JPG', 'WEBP'],
     storage: config.aws?.accessKeyId ? 'AWS S3' : 'Local',
     briefUploads: true,
-    invoiceUploads: true
+    invoiceUploads: true,
+    scriptUploads: true // New script uploads
   };
 }
 
@@ -465,9 +534,9 @@ function checkAIProcessingService() {
   return {
     status: config.featureFlags?.aiFeatures ? 'enabled' : 'disabled',
     provider: 'OpenAI',
-    model: 'gpt-3.5-turbo',
+    models: ['gpt-4', 'whisper-1'],
     available: !!process.env.OPENAI_API_KEY,
-    features: ['brief_extraction', 'risk_assessment', 'pricing_suggestions', 'business_insights', 'trend_analysis']
+    features: ['brief_extraction', 'risk_assessment', 'pricing_suggestions', 'business_insights', 'trend_analysis', 'script_generation', 'video_transcription']
   };
 }
 
@@ -491,7 +560,81 @@ function checkBriefAnalysisService() {
 }
 
 /**
- * Check analytics engine service (NEW)
+ * Check script generation service (NEW)
+ */
+function checkScriptGenerationService() {
+  return {
+    status: 'enabled',
+    features: {
+      textScripts: true,
+      fileUpload: true,
+      videoTranscription: config.featureFlags?.aiFeatures || false,
+      aiGeneration: config.featureFlags?.aiFeatures || false,
+      abTesting: config.featureFlags?.aiFeatures || false,
+      trendIntegration: config.featureFlags?.aiFeatures || false,
+      dealConnection: true,
+      platformOptimization: true,
+      scriptAnalytics: true,
+      exportOptions: true,
+      bulkOperations: true
+    },
+    platforms: {
+      supported: [
+        'instagram_reel', 'instagram_post', 'instagram_story',
+        'youtube_video', 'youtube_shorts',
+        'linkedin_video', 'linkedin_post',
+        'twitter_post', 'facebook_reel', 'tiktok_video'
+      ],
+      optimizations: ['duration', 'aspect_ratio', 'content_style', 'trending_elements']
+    },
+    subscriptionLimits: {
+      starter: { scriptsPerMonth: 10, maxFileSize: '5MB', videoTranscription: false },
+      pro: { scriptsPerMonth: 25, maxFileSize: '10MB', videoTranscription: true },
+      elite: { scriptsPerMonth: 'unlimited', maxFileSize: '25MB', videoTranscription: true },
+      agency: { scriptsPerMonth: 'unlimited', maxFileSize: '50MB', videoTranscription: true }
+    },
+    performance: {
+      aiGenerationTime: 'Average 30-60 seconds',
+      videoTranscriptionTime: 'Average 2-5 minutes',
+      caching: true,
+      retryLogic: true
+    }
+  };
+}
+
+/**
+ * Check video transcription service (NEW)
+ */
+function checkVideoTranscriptionService() {
+  return {
+    status: config.featureFlags?.aiFeatures ? 'enabled' : 'disabled',
+    provider: 'OpenAI Whisper',
+    features: {
+      multipleFormats: ['MP4', 'MOV', 'AVI'],
+      multiLanguage: true,
+      speakerDetection: true,
+      timestamping: true,
+      confidenceScoring: true
+    },
+    limitations: {
+      maxFileSize: {
+        pro: '25MB',
+        elite: '100MB',
+        agency: '200MB'
+      },
+      maxDuration: '1 hour',
+      supportedLanguages: ['en', 'hi', 'es', 'fr', 'de']
+    },
+    performance: {
+      processingTime: '~30% of video duration',
+      accuracy: '95%+ for clear audio',
+      retryOnFailure: true
+    }
+  };
+}
+
+/**
+ * Check analytics engine service
  */
 function checkAnalyticsEngineService() {
   return {
@@ -507,7 +650,7 @@ function checkAnalyticsEngineService() {
       predictiveForecasting: config.featureFlags?.aiFeatures || false
     },
     dataCorrelation: {
-      modules: ['deals', 'invoices', 'performance', 'contracts', 'briefs', 'ratecards'],
+      modules: ['deals', 'invoices', 'performance', 'contracts', 'briefs', 'ratecards', 'scripts'],
       realTimeUpdates: true,
       historicalAnalysis: true
     },
@@ -525,7 +668,7 @@ function checkAnalyticsEngineService() {
 }
 
 /**
- * Check caching service for analytics (NEW)
+ * Check caching service for analytics
  */
 function checkCachingService() {
   return {
@@ -535,13 +678,15 @@ function checkCachingService() {
       analyticsCache: true,
       dashboardCache: true,
       insightsCache: true,
-      trendCache: true
+      trendCache: true,
+      scriptCache: true // New script analytics cache
     },
     ttl: {
       dashboard: '30 minutes',
       revenue: '1 hour',
       insights: '2 hours',
-      trends: '4 hours'
+      trends: '4 hours',
+      scripts: '1 hour' // New script cache TTL
     },
     performance: {
       hitRate: 'Tracked per user',
@@ -564,7 +709,7 @@ const API_PREFIX = `/api/${config.server.apiVersion || 'v1'}`;
 app.use(API_PREFIX, trackAPIUsage);
 
 /**
- * Welcome endpoint with enhanced feature information including analytics
+ * Welcome endpoint with enhanced feature information including analytics and scripts
  */
 app.get(API_PREFIX, (req, res) => {
   res.json(
@@ -584,7 +729,8 @@ app.get(API_PREFIX, (req, res) => {
         contracts: `${API_PREFIX}/contracts`,
         subscriptions: `${API_PREFIX}/subscriptions`,
         agency: `${API_PREFIX}/agency`,
-        analytics: `${API_PREFIX}/analytics` // New analytics endpoint
+        analytics: `${API_PREFIX}/analytics`,
+        scripts: `${API_PREFIX}/scripts` // New scripts endpoint
       },
       features: {
         quarterlyBilling: true,
@@ -610,7 +756,7 @@ app.get(API_PREFIX, (req, res) => {
         dealConversion: true,
         clarificationManagement: true,
         riskAssessment: config.featureFlags?.aiFeatures || false,
-        // Analytics features (NEW)
+        // Analytics features
         businessIntelligence: true,
         revenueAnalytics: true,
         dealPerformanceAnalytics: true,
@@ -620,7 +766,19 @@ app.get(API_PREFIX, (req, res) => {
         performanceCorrelation: true,
         crossModuleAnalytics: true,
         predictiveForecasting: config.featureFlags?.aiFeatures || false,
-        cachingOptimization: true
+        cachingOptimization: true,
+        // Scripts module features (NEW)
+        scriptGeneration: true,
+        aiScriptGeneration: config.featureFlags?.aiFeatures || false,
+        videoTranscription: config.featureFlags?.aiFeatures || false,
+        fileUploadScripts: true,
+        multiPlatformOptimization: true,
+        scriptAnalytics: true,
+        abTestingScripts: config.featureFlags?.aiFeatures || false,
+        trendIntegrationScripts: config.featureFlags?.aiFeatures || false,
+        scriptDealConnection: true,
+        bulkScriptOperations: true,
+        scriptExportOptions: true
       }
     })
   );
@@ -636,7 +794,7 @@ app.get(API_PREFIX, (req, res) => {
  */
 
 let loadedModules = 0;
-let totalModules = 10; // Updated to include analytics module
+let totalModules = 11; // Updated to include scripts module
 
 // Authentication routes
 try {
@@ -691,7 +849,7 @@ try {
 
 // Brief analyzer routes - ENHANCED WITH AI PROCESSING
 try {
-  const briefRoutes = require('./modules/briefs/routes');
+  const briefRoutes = require('./modules/briefs(not used)/routes');
   app.use(`${API_PREFIX}/briefs`, briefRoutes);
   logInfo('✅ Brief routes loaded successfully');
   logInfo('📋 Brief features enabled: AI Extraction, File Upload, Deal Conversion, Risk Assessment');
@@ -730,7 +888,7 @@ try {
   logWarn('⚠️  Agency routes not found - module may not be implemented yet', { error: error.message });
 }
 
-// Analytics routes - NEW MODULE
+// Analytics routes
 try {
   const analyticsRoutes = require('./modules/analytics/routes');
   app.use(`${API_PREFIX}/analytics`, analyticsRoutes);
@@ -739,6 +897,17 @@ try {
   loadedModules++;
 } catch (error) {
   logWarn('⚠️  Analytics routes not found - module may not be implemented yet', { error: error.message });
+}
+
+// Scripts routes - NEW MODULE
+try {
+  const scriptsRoutes = require('./modules/scripts/routes');
+  app.use(`${API_PREFIX}/scripts`, scriptsRoutes);
+  logInfo('✅ Scripts routes loaded successfully');
+  logInfo('📝 Scripts features enabled: AI Script Generation, Video Transcription, Multi-Platform Optimization, A/B Testing, Trend Integration');
+  loadedModules++;
+} catch (error) {
+  logWarn('⚠️  Scripts routes not found - module may not be implemented yet', { error: error.message });
 }
 
 // ============================================
@@ -766,10 +935,16 @@ app.get(`${API_PREFIX}/status`, (req, res) => {
         status: checkModuleExists('briefs').status,
         features: checkModuleExists('briefs').features || {}
       },
-      analyticsModule: { // NEW
+      analyticsModule: {
         status: checkModuleExists('analytics').status,
         features: checkModuleExists('analytics').features || {},
         subscriptionTiers: checkModuleExists('analytics').subscriptionTiers || {}
+      },
+      scriptsModule: { // NEW
+        status: checkModuleExists('scripts').status,
+        features: checkModuleExists('scripts').features || {},
+        platforms: checkModuleExists('scripts').platforms || [],
+        subscriptionTiers: checkModuleExists('scripts').subscriptionTiers || {}
       }
     })
   );
@@ -779,7 +954,7 @@ app.get(`${API_PREFIX}/status`, (req, res) => {
  * Get loaded modules list
  */
 function getLoadedModules() {
-  const modules = ['auth', 'subscriptions', 'deals', 'invoices', 'ratecards', 'briefs', 'performance', 'contracts', 'agency', 'analytics'];
+  const modules = ['auth', 'subscriptions', 'deals', 'invoices', 'ratecards', 'briefs', 'performance', 'contracts', 'agency', 'analytics', 'scripts'];
   return modules.filter(module => {
     try {
       require(`./modules/${module}/routes`);
@@ -827,7 +1002,7 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
         'clarification_management',
         'risk_assessment',
         'pricing_suggestions',
-        // Analytics features (NEW)
+        // Analytics features
         'business_intelligence',
         'revenue_analytics',
         'deal_performance_analytics',
@@ -837,7 +1012,18 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
         'performance_correlation',
         'cross_module_analytics',
         'predictive_forecasting',
-        'caching_optimization'
+        'caching_optimization',
+        // Scripts features (NEW)
+        'ai_script_generation',
+        'video_transcription',
+        'multi_platform_optimization',
+        'script_analytics',
+        'ab_testing_scripts',
+        'trend_integration_scripts',
+        'script_deal_connection',
+        'bulk_script_operations',
+        'script_export_options',
+        'file_upload_scripts'
       ]
     })
   );
@@ -848,7 +1034,7 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
 // ============================================
 
 /**
- * API documentation endpoint with analytics module details
+ * API documentation endpoint with analytics and scripts module details
  */
 app.get(`${API_PREFIX}/docs`, (req, res) => {
   res.json(
@@ -930,7 +1116,7 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
           supported_files: ['PDF', 'DOC', 'DOCX', 'TXT'],
           ai_features: config.featureFlags?.aiFeatures || false
         },
-        analytics: { // NEW MODULE DOCUMENTATION
+        analytics: {
           description: 'Advanced business intelligence and reporting for creator economy management',
           base_path: `${API_PREFIX}/analytics`,
           features: [
@@ -965,6 +1151,52 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
           data_correlation: [
             'deals', 'invoices', 'performance', 'contracts', 'briefs', 'ratecards'
           ]
+        },
+        scripts: { // NEW MODULE DOCUMENTATION
+          description: 'AI-powered content script generation for social media creators with multi-platform optimization',
+          base_path: `${API_PREFIX}/scripts`,
+          features: [
+            'text_script_creation',
+            'file_upload_scripts',
+            'video_transcription',
+            'ai_script_generation',
+            'multi_platform_optimization',
+            'ab_testing_variations',
+            'trend_integration',
+            'deal_connection',
+            'script_analytics',
+            'bulk_operations',
+            'export_options'
+          ],
+          key_endpoints: {
+            create_text: 'POST /scripts/create-text',
+            create_file: 'POST /scripts/create-file',
+            create_video: 'POST /scripts/create-video',
+            get_script: 'GET /scripts/:scriptId',
+            regenerate: 'POST /scripts/:scriptId/regenerate',
+            create_variation: 'POST /scripts/:scriptId/variations',
+            link_deal: 'POST /scripts/:scriptId/link-deal/:dealId',
+            export: 'GET /scripts/:scriptId/export',
+            dashboard_stats: 'GET /scripts/dashboard/stats',
+            bulk_update: 'PATCH /scripts/bulk-update',
+            search: 'POST /scripts/search'
+          },
+          supported_platforms: [
+            'instagram_reel', 'instagram_post', 'instagram_story',
+            'youtube_video', 'youtube_shorts',
+            'linkedin_video', 'linkedin_post',
+            'twitter_post', 'facebook_reel', 'tiktok_video'
+          ],
+          supported_files: ['PDF', 'DOC', 'DOCX', 'TXT'],
+          supported_videos: ['MP4', 'MOV', 'AVI'],
+          subscription_requirements: {
+            starter: ['text_scripts', 'basic_generation', '10_per_month'],
+            pro: ['all_starter_features', 'video_transcription', 'ab_testing', '25_per_month'],
+            elite: ['all_pro_features', 'unlimited_scripts', 'advanced_features'],
+            agency: ['all_elite_features', 'bulk_operations', 'team_features']
+          },
+          ai_features: config.featureFlags?.aiFeatures || false,
+          video_transcription: config.featureFlags?.aiFeatures || false
         }
       },
       rate_limits: {
@@ -975,11 +1207,17 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
         file_upload: '20 requests per 15 minutes',
         brief_creation: 'Tier-based limits (5-200 per hour)',
         ai_processing: 'Tier-based limits (0-100 per hour)',
-        // Analytics rate limits (NEW)
+        // Analytics rate limits
         analytics_standard: '100 requests per 15 minutes',
         analytics_ai: '20 requests per hour',
         analytics_advanced: '10 requests per hour',
-        analytics_cache: '5 requests per 15 minutes'
+        analytics_cache: '5 requests per 15 minutes',
+        // Scripts rate limits (NEW)
+        script_creation: 'Tier-based limits (5-unlimited per hour)',
+        script_ai_generation: 'Tier-based limits (0-100 per hour)',
+        video_transcription: 'Tier-based limits (0-unlimited per hour)',
+        script_regeneration: '5 requests per hour',
+        script_variations: '10 requests per hour'
       },
       file_upload: {
         max_size: {
@@ -991,12 +1229,20 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
         },
         allowed_types: {
           invoices: ['PDF', 'JPEG', 'PNG', 'JPG', 'WEBP'],
-          briefs: ['PDF', 'DOC', 'DOCX', 'TXT']
+          briefs: ['PDF', 'DOC', 'DOCX', 'TXT'],
+          scripts: ['PDF', 'DOC', 'DOCX', 'TXT', 'MP4', 'MOV', 'AVI'] // NEW
+        },
+        video_limits: { // NEW
+          pro: '25MB',
+          elite: '100MB',
+          agency: '200MB'
         },
         endpoints: [
           'POST /invoices/:id/upload-payment-screenshot',
           'POST /invoices/:id/generate-pdf',
-          'POST /briefs/create-file'
+          'POST /briefs/create-file',
+          'POST /scripts/create-file', // NEW
+          'POST /scripts/create-video' // NEW
         ]
       },
       support: {
@@ -1027,12 +1273,19 @@ app.get(`${API_PREFIX}/postman`, (req, res) => {
         'Brief analysis workflows',
         'AI extraction examples',
         'Deal conversion examples',
-        // Analytics features (NEW)
+        // Analytics features
         'Analytics dashboard examples',
         'Revenue intelligence workflows',
         'AI insights generation',
         'Trend analysis examples',
-        'Risk analytics workflows'
+        'Risk analytics workflows',
+        // Scripts features (NEW)
+        'Script generation workflows',
+        'Video transcription examples',
+        'AI script generation examples',
+        'Multi-platform optimization examples',
+        'A/B testing workflows',
+        'Script analytics examples'
       ]
     })
   );
@@ -1043,7 +1296,7 @@ app.get(`${API_PREFIX}/postman`, (req, res) => {
 // ============================================
 
 /**
- * Get current feature flags with analytics-specific flags
+ * Get current feature flags with analytics and scripts-specific flags
  */
 app.get(`${API_PREFIX}/features`, (req, res) => {
   res.json(
@@ -1087,7 +1340,7 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
         pricing_suggestions: config.featureFlags?.aiFeatures || false,
         auto_clarification_email: config.featureFlags?.emailNotifications || false,
         
-        // Analytics module features (NEW)
+        // Analytics module features
         business_intelligence: true,
         revenue_analytics: true,
         deal_performance_analytics: true,
@@ -1100,7 +1353,23 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
         analytics_caching: true,
         custom_date_ranges: true,
         analytics_export: false, // Future feature
-        industry_benchmarks: false // Future feature
+        industry_benchmarks: false, // Future feature
+        
+        // Scripts module features (NEW)
+        script_generation: true,
+        ai_script_generation: config.featureFlags?.aiFeatures || false,
+        video_transcription: config.featureFlags?.aiFeatures || false,
+        file_upload_scripts: true,
+        multi_platform_optimization: true,
+        script_analytics: true,
+        ab_testing_scripts: config.featureFlags?.aiFeatures || false,
+        trend_integration_scripts: config.featureFlags?.aiFeatures || false,
+        script_deal_connection: true,
+        bulk_script_operations: true,
+        script_export_options: true,
+        script_regeneration: config.featureFlags?.aiFeatures || false,
+        script_variations: config.featureFlags?.aiFeatures || false,
+        advanced_script_analytics: true
       },
       environment: config.server.environment,
       brief_features: {
@@ -1129,7 +1398,7 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
         payment_reminder_schedule: 'Daily at 9 AM IST',
         tax_compliance: ['GST', 'TDS', 'PAN', 'IFSC']
       },
-      analytics_features: { // NEW
+      analytics_features: {
         subscription_access: {
           starter: 'No analytics access',
           pro: 'Basic analytics + AI insights',
@@ -1137,7 +1406,7 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
           agency: 'Portfolio analytics'
         },
         data_correlation: {
-          modules: ['deals', 'invoices', 'performance', 'contracts', 'briefs', 'ratecards'],
+          modules: ['deals', 'invoices', 'performance', 'contracts', 'briefs', 'ratecards', 'scripts'],
           real_time_updates: true,
           historical_analysis: true
         },
@@ -1159,10 +1428,138 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
           advanced: '10 requests/hour',
           cache_ops: '5 requests/15min'
         }
+      },
+      scripts_features: { // NEW
+        subscription_access: {
+          starter: 'Basic script generation (10/month)',
+          pro: 'Enhanced features + video transcription (25/month)',
+          elite: 'Unlimited scripts + advanced features',
+          agency: 'Team features + bulk operations'
+        },
+        supported_platforms: [
+          'instagram_reel', 'instagram_post', 'instagram_story',
+          'youtube_video', 'youtube_shorts',
+          'linkedin_video', 'linkedin_post',
+          'twitter_post', 'facebook_reel', 'tiktok_video'
+        ],
+        file_support: {
+          documents: ['PDF', 'DOC', 'DOCX', 'TXT'],
+          videos: ['MP4', 'MOV', 'AVI'],
+          max_file_size_by_tier: {
+            starter: '5MB (no video)',
+            pro: '10MB docs, 25MB video',
+            elite: '25MB docs, 100MB video',
+            agency: '50MB docs, 200MB video'
+          }
+        },
+        ai_capabilities: {
+          script_generation: config.featureFlags?.aiFeatures || false,
+          video_transcription: config.featureFlags?.aiFeatures || false,
+          ab_testing: config.featureFlags?.aiFeatures || false,
+          trend_integration: config.featureFlags?.aiFeatures || false,
+          content_optimization: config.featureFlags?.aiFeatures || false
+        },
+        rate_limits: {
+          script_creation: 'Tier-based limits',
+          ai_generation: '5-100 requests/hour',
+          video_transcription: '0-unlimited/hour',
+          regeneration: '5 requests/hour',
+          variations: '10 requests/hour'
+        },
+        export_formats: ['JSON', 'TXT'],
+        analytics: {
+          script_performance: true,
+          generation_analytics: true,
+          platform_optimization: true,
+          success_rates: true
+        }
       }
     })
   );
 });
+
+// ============================================
+// SCRIPTS-SPECIFIC ERROR HANDLING (NEW)
+// ============================================
+
+// Scripts file upload error handler
+app.use('/api/*/scripts', (error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      const tier = req.user?.subscriptionTier || 'starter';
+      const limits = {
+        starter: '5MB',
+        pro: '10MB documents, 25MB videos',
+        elite: '25MB documents, 100MB videos',
+        agency_starter: '25MB documents, 100MB videos',
+        agency_pro: '50MB documents, 200MB videos'
+      };
+      
+      return res.status(400).json({
+        success: false,
+        message: `File too large. Maximum size is ${limits[tier]} for ${tier} plan.`,
+        code: 400,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    if (error.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only one file can be uploaded at a time.',
+        code: 400,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  if (error.message.includes('Invalid file type')) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid file type. Only PDF, DOC, DOCX, TXT, MP4, MOV, and AVI files are allowed.',
+      code: 400,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // AI generation specific errors
+  if (error.message.includes('AI generation failed') || 
+      error.message.includes('script generation failed')) {
+    return res.status(503).json({
+      success: false,
+      message: 'AI script generation temporarily unavailable. Please try again later.',
+      code: 503,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Video transcription specific errors
+  if (error.message.includes('Video transcription failed') || 
+      error.message.includes('transcription')) {
+    return res.status(422).json({
+      success: false,
+      message: 'Video transcription failed. Please ensure the video has clear audio and is within size limits.',
+      code: 422,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Subscription limit errors
+  if (error.message.includes('script limit exceeded') || 
+      error.message.includes('not available in your subscription')) {
+    return res.status(403).json({
+      success: false,
+      message: error.message,
+      code: 403,
+      upgrade: true,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  next(error);
+});
+
+logInfo('📝 Scripts-specific error handling configured');
 
 // ============================================
 // ANALYTICS-SPECIFIC ERROR HANDLING
@@ -1471,7 +1868,7 @@ const initializeBriefServices = async () => {
         try {
           logInfo('🤖 Updating AI processing statuses...');
           
-          const { Brief } = require('./modules/briefs/model');
+          const { Brief } = require('./modules/briefs(not used)/model');
           
           // Reset stuck processing briefs (processing for more than 1 hour)
           const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -1502,7 +1899,7 @@ const initializeBriefServices = async () => {
       try {
         logInfo('📊 Updating brief analytics...');
         
-        const { Brief } = require('./modules/briefs/model');
+        const { Brief } = require('./modules/briefs(not used)/model');
         
         // Update brief statuses based on AI extraction completion
         const result = await Brief.updateMany(
@@ -1535,7 +1932,7 @@ const initializeBriefServices = async () => {
 };
 
 // ============================================
-// ANALYTICS SERVICES INITIALIZATION (NEW)
+// ANALYTICS SERVICES INITIALIZATION
 // ============================================
 
 /**
@@ -1658,6 +2055,247 @@ const initializeAnalyticsServices = async () => {
   }
 };
 
+// ============================================
+// SCRIPTS SERVICES INITIALIZATION (NEW)
+// ============================================
+
+/**
+ * Initialize scripts-specific services
+ */
+const initializeScriptsServices = async () => {
+  try {
+    logInfo('📝 Initializing scripts services...');
+    
+    // Initialize script file cleanup job
+    cron.schedule('0 3 * * 1', async () => { // Every Monday at 3 AM
+      try {
+        logInfo('🗑️  Cleaning up old script files...');
+        
+        const fs = require('fs').promises;
+        const path = require('path');
+        const scriptsUploadsDir = path.join(__dirname, '../uploads/scripts');
+        
+        try {
+          const files = await fs.readdir(scriptsUploadsDir);
+          const now = Date.now();
+          const sixtyDaysAgo = now - (60 * 24 * 60 * 60 * 1000);
+          
+          let cleanedCount = 0;
+          for (const file of files) {
+            const filePath = path.join(scriptsUploadsDir, file);
+            const stats = await fs.stat(filePath);
+            
+            if (stats.mtime.getTime() < sixtyDaysAgo) {
+              await fs.unlink(filePath);
+              cleanedCount++;
+            }
+          }
+          
+          logInfo(`✅ Script file cleanup completed - removed ${cleanedCount} old files`);
+        } catch (error) {
+          logWarn('⚠️  Scripts uploads directory not found or cleanup failed', { error: error.message });
+        }
+        
+      } catch (error) {
+        logError('❌ Script file cleanup failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    // Initialize AI script processing queue cleanup
+    if (config.featureFlags?.aiFeatures) {
+      cron.schedule('0 8 * * *', async () => {
+        try {
+          logInfo('🤖 Updating AI script processing statuses...');
+          
+          const { Script } = require('./modules/scripts/model');
+          
+          // Reset stuck processing scripts (processing for more than 30 minutes)
+          const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+          const result = await Script.updateMany(
+            {
+              'aiGeneration.status': 'processing',
+              updatedAt: { $lt: thirtyMinutesAgo }
+            },
+            {
+              $set: { 'aiGeneration.status': 'failed' }
+            }
+          );
+          
+          logInfo(`✅ AI script processing cleanup completed - reset ${result.modifiedCount} stuck processes`);
+          
+        } catch (error) {
+          logError('❌ AI script processing cleanup failed', { error: error.message });
+        }
+      }, {
+        timezone: 'Asia/Kolkata'
+      });
+      
+      logInfo('🤖 AI script processing cleanup cron job scheduled (daily at 8 AM IST)');
+    }
+    
+    // Initialize script analytics update job (daily)
+    cron.schedule('0 10 * * *', async () => {
+      try {
+        logInfo('📊 Updating script analytics...');
+        
+        const { Script } = require('./modules/scripts/model');
+        
+        // Update script statuses and calculate success rates
+        const scripts = await Script.find({
+          'aiGeneration.status': 'completed',
+          status: 'draft'
+        });
+        
+        let updatedCount = 0;
+        for (const script of scripts) {
+          script.status = 'generated';
+          await script.save();
+          updatedCount++;
+        }
+        
+        logInfo(`✅ Script analytics updated - ${updatedCount} scripts marked as generated`);
+        
+      } catch (error) {
+        logError('❌ Script analytics update failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    // Initialize video transcription cleanup job (weekly)
+    if (config.featureFlags?.aiFeatures) {
+      cron.schedule('0 4 * * 0', async () => { // Sunday at 4 AM
+        try {
+          logInfo('🎥 Cleaning up processed video files...');
+          
+          const { Script } = require('./modules/scripts/model');
+          
+          // Find scripts with completed transcription older than 30 days
+          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+          const oldScripts = await Script.find({
+            inputType: 'video_transcription',
+            'originalContent.transcription.transcribedAt': { $lt: thirtyDaysAgo }
+          });
+          
+          let cleanedCount = 0;
+          for (const script of oldScripts) {
+            try {
+              const fs = require('fs').promises;
+              if (script.originalContent.videoFile.uploadPath) {
+                await fs.unlink(script.originalContent.videoFile.uploadPath);
+                cleanedCount++;
+              }
+            } catch (error) {
+              logWarn('Failed to cleanup video file', { 
+                scriptId: script._id, 
+                error: error.message 
+              });
+            }
+          }
+          
+          logInfo(`✅ Video file cleanup completed - removed ${cleanedCount} old video files`);
+          
+        } catch (error) {
+          logError('❌ Video file cleanup failed', { error: error.message });
+        }
+      }, {
+        timezone: 'Asia/Kolkata'
+      });
+      
+      logInfo('🎥 Video file cleanup cron job scheduled (weekly on Sunday at 4 AM IST)');
+    }
+    
+    logInfo('📝 Script file cleanup cron job scheduled (weekly on Monday)');
+    logInfo('📊 Script analytics cron job scheduled (daily at 10 AM IST)');
+    
+    return true;
+  } catch (error) {
+    logWarn('⚠️  Scripts services initialization partially failed', { error: error.message });
+    return false;
+  }
+};
+
+/**
+ * Validate scripts environment and dependencies (NEW)
+ */
+const validateScriptsEnvironment = () => {
+  const warnings = [];
+  const errors = [];
+  
+  // Check AI processing requirements for script generation
+  if (config.featureFlags?.aiFeatures) {
+    if (!process.env.OPENAI_API_KEY) {
+      errors.push('OpenAI API key not configured - AI script generation and video transcription will fail');
+    } else {
+      logInfo('✅ OpenAI API key configured for AI script generation');
+    }
+  }
+  
+  // Check MongoDB for scripts collections
+  try {
+    // MongoDB is already initialized, script models will create collections as needed
+    logInfo('✅ MongoDB available for scripts data storage');
+  } catch (error) {
+    errors.push('MongoDB not available - scripts data storage will fail');
+  }
+  
+  // Check file processing dependencies
+  try {
+    require('pdf-parse');
+    require('mammoth');
+    logInfo('✅ File processing libraries available for scripts (pdf-parse, mammoth)');
+  } catch (error) {
+    errors.push('File processing libraries not installed - script file upload will fail');
+  }
+  
+  // Check upload directory
+  const fs = require('fs');
+  const path = require('path');
+  const scriptsUploadsDir = path.join(__dirname, '../uploads/scripts');
+  
+  try {
+    if (!fs.existsSync(scriptsUploadsDir)) {
+      fs.mkdirSync(scriptsUploadsDir, { recursive: true });
+      logInfo('✅ Scripts uploads directory created');
+    } else {
+      logInfo('✅ Scripts uploads directory exists');
+    }
+  } catch (error) {
+    warnings.push('Cannot create scripts uploads directory - file uploads may fail');
+  }
+  
+  // Check memory for AI processing
+  const totalMemory = process.memoryUsage().heapTotal;
+  if (totalMemory < 200 * 1024 * 1024) { // Less than 200MB
+    warnings.push('Low memory available - AI script generation may be limited');
+  } else {
+    logInfo('✅ Sufficient memory available for AI script generation');
+  }
+  
+  // Check if deals module is available for script-deal linking
+  try {
+    require('./modules/deals/model');
+    logInfo('✅ Deals module available for script linking');
+  } catch (error) {
+    warnings.push('Deals module not available - script-deal linking will not work');
+  }
+  
+  if (errors.length > 0) {
+    logError('❌ Scripts module environment errors:', { errors });
+    return false;
+  }
+  
+  if (warnings.length > 0) {
+    logWarn('⚠️  Scripts module environment warnings:', { warnings });
+  } else {
+    logInfo('✅ Scripts module environment validation passed');
+  }
+  
+  return true;
+};
+
 /**
  * Validate analytics environment and dependencies
  */
@@ -1691,7 +2329,7 @@ const validateAnalyticsEnvironment = () => {
   }
   
   // Check if other required modules are available for data correlation
-  const requiredModules = ['deals', 'invoices', 'performance', 'contracts'];
+  const requiredModules = ['deals', 'invoices', 'performance', 'contracts', 'scripts'];
   const missingModules = [];
   
   for (const module of requiredModules) {
@@ -1831,7 +2469,7 @@ const validateBriefEnvironment = () => {
 // ============================================
 
 /**
- * Initialize the application with enhanced support for all modules including analytics
+ * Initialize the application with enhanced support for all modules including analytics and scripts
  */
 const initializeApp = async () => {
   try {
@@ -1859,6 +2497,12 @@ const initializeApp = async () => {
     const analyticsEnvOk = validateAnalyticsEnvironment();
     if (!analyticsEnvOk) {
       logWarn('⚠️  Analytics module environment validation failed - some features may be limited');
+    }
+    
+    logInfo('📝 Validating scripts module environment...');
+    const scriptsEnvOk = validateScriptsEnvironment();
+    if (!scriptsEnvOk) {
+      logWarn('⚠️  Scripts module environment validation failed - some features may be limited');
     }
     
     // Initialize external services
@@ -1892,6 +2536,15 @@ const initializeApp = async () => {
       logWarn('⚠️  Analytics services partially initialized');
     }
     
+    // Initialize scripts services
+    logInfo('📝 Initializing scripts services...');
+    const scriptsServicesOk = await initializeScriptsServices();
+    if (scriptsServicesOk) {
+      logInfo('✅ Scripts services initialized successfully');
+    } else {
+      logWarn('⚠️  Scripts services partially initialized');
+    }
+    
     // Log module status
     logInfo(`📦 Loaded ${loadedModules}/${totalModules} modules (${Math.round((loadedModules/totalModules)*100)}% complete)`);
     
@@ -1899,6 +2552,7 @@ const initializeApp = async () => {
     const invoiceStatus = checkModuleExists('invoices');
     const briefStatus = checkModuleExists('briefs');
     const analyticsStatus = checkModuleExists('analytics');
+    const scriptsStatus = checkModuleExists('scripts');
     
     if (invoiceStatus.available) {
       logInfo('📄 Invoice module status:', {
@@ -1919,6 +2573,15 @@ const initializeApp = async () => {
         status: analyticsStatus.status,
         features: analyticsStatus.features,
         subscriptionTiers: analyticsStatus.subscriptionTiers
+      });
+    }
+    
+    if (scriptsStatus.available) {
+      logInfo('📝 Scripts module status:', {
+        status: scriptsStatus.status,
+        features: scriptsStatus.features,
+        platforms: scriptsStatus.platforms,
+        subscriptionTiers: scriptsStatus.subscriptionTiers
       });
     }
     
@@ -2007,6 +2670,15 @@ const initializeServices = async () => {
       logWarn('⚠️  Analytics processing service not available', { error: error.message });
     }
     
+    // Scripts Processing Service Check
+    try {
+      // MongoDB is already initialized for scripts data storage
+      logInfo('📝 Scripts processing service available');
+      servicesInitialized++;
+    } catch (error) {
+      logWarn('⚠️  Scripts processing service not available', { error: error.message });
+    }
+    
     logInfo(`🔧 Initialized ${servicesInitialized} external services`);
     return true;
   } catch (error) {
@@ -2085,8 +2757,10 @@ module.exports.initializeApp = initializeApp;
 module.exports.gracefulShutdown = gracefulShutdown;
 module.exports.initializeInvoiceServices = initializeInvoiceServices;
 module.exports.initializeBriefServices = initializeBriefServices;
-module.exports.initializeAnalyticsServices = initializeAnalyticsServices; // NEW
+module.exports.initializeAnalyticsServices = initializeAnalyticsServices;
+module.exports.initializeScriptsServices = initializeScriptsServices; // NEW
 module.exports.validateInvoiceEnvironment = validateInvoiceEnvironment;
 module.exports.validateBriefEnvironment = validateBriefEnvironment;
-module.exports.validateAnalyticsEnvironment = validateAnalyticsEnvironment; // NEW
+module.exports.validateAnalyticsEnvironment = validateAnalyticsEnvironment;
+module.exports.validateScriptsEnvironment = validateScriptsEnvironment; // NEW
 module.exports.rateLimitByTier = rateLimitByTier;

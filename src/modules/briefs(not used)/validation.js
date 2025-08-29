@@ -132,14 +132,27 @@ const createTextBriefSchema = Joi.object({
 // BRIEF RETRIEVAL SCHEMAS
 // ============================================
 
-/**
- * Get Briefs Query Schema
- * GET /api/briefs
- */
+// Updated validation schema to handle "all" values and empty search
 const getBriefsQuerySchema = Joi.object({
-  status: briefStatusSchema.optional(),
+  status: Joi.alternatives()
+    .try(
+      briefStatusSchema,
+      Joi.string().valid('all')
+    )
+    .optional()
+    .messages({
+      'any.only': 'Invalid status filter'
+    }),
   
-  inputType: inputTypeSchema.optional(),
+  inputType: Joi.alternatives()
+    .try(
+      inputTypeSchema,
+      Joi.string().valid('all')
+    )
+    .optional()
+    .messages({
+      'any.only': 'Invalid input type filter'
+    }),
   
   page: Joi.number()
     .integer()
@@ -184,6 +197,7 @@ const getBriefsQuerySchema = Joi.object({
   search: Joi.string()
     .min(2)
     .max(100)
+    .allow('') // Allow empty strings
     .optional()
     .messages({
       'string.min': 'Search query must be at least 2 characters',

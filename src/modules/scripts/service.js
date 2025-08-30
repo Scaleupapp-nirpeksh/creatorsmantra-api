@@ -18,9 +18,11 @@ const {
   logError,
   logWarn
 } = require('../../shared/utils');
+const { withMemoryManagement, canHandleFileSize, forceGarbageCollection } = require('../../shared/memoryMonitor');
 const config = require('../../shared/config');
 const OpenAI = require('openai');
 const fs = require('fs').promises;
+const { createReadStream } = require('fs');
 const path = require('path');
 const PDFParse = require('pdf-parse');
 const mammoth = require('mammoth'); // For .docx files
@@ -237,131 +239,456 @@ class ScriptGeneratorService {
   // VIDEO TRANSCRIPTION SERVICE
   // ============================================
 
-  /**
-   * Process Video Transcription using OpenAI Whisper
-   * @param {String} scriptId - Script ID
-   * @returns {Object} Transcription results
+/**
+   * Enhanced Video Transcription Process with Aggressive Memory Management
    */
-  async processVideoTranscription(scriptId) {
-    const MAX_RETRIES = 2;
-    let retryCount = 0;
-    
+async processVideoTranscription(scriptId) {
+  const MAX_RETRIES = 2;
+  let retryCount = 0;
+  let script;
+  
+  try {
+    script = await Script.findById(scriptId);
+    if (!script) {
+      throw new Error('Script not found');
+    }
+
+    logInfo('Starting video transcription with memory management', { 
+      scriptId,
+      fileSizeMB: Math.round(script.originalContent.videoFile.fileSize / (1024 * 1024))
+    });
+
+    const videoPath = script.originalContent.videoFile.uploadPath;
+    const fileSize = script.originalContent.videoFile.fileSize;
+
+    // Pre-processing memory validation
+    const memoryCheck = canHandleFileSize(fileSize);
+    if (!memoryCheck.canHandle) {
+      throw new Error(
+        `File too large for current memory capacity. ` +
+        `File: ${memoryCheck.fileSizeMB}MB, Available: ${memoryCheck.availableHeapMB}MB, ` +
+        `Required: ${memoryCheck.requiredMemoryMB}MB`
+      );
+    }
+
+    // Validate file exists and is accessible
     try {
-      const script = await Script.findById(scriptId);
-      if (!script) {
-        throw new Error('Script not found');
-      }
+      await fs.access(videoPath);
+    } catch (error) {
+      throw new Error('Video file not found or inaccessible');
+    }
 
-      logInfo('Starting video transcription', { scriptId });
+    let transcriptionResults;
 
-      const startTime = Date.now();
-      let transcriptionResults;
-
-      // Retry logic for transcription
-      while (retryCount <= MAX_RETRIES) {
-        try {
-          transcriptionResults = await this.performVideoTranscription(script.originalContent.videoFile.uploadPath);
-          break; // Success, exit retry loop
-        } catch (transcriptionError) {
-          retryCount++;
-          logWarn(`Video transcription attempt ${retryCount} failed`, { 
-            scriptId, 
-            error: transcriptionError.message,
-            retryCount,
-            maxRetries: MAX_RETRIES
-          });
-          
-          if (retryCount > MAX_RETRIES) {
-            throw transcriptionError; // Final attempt failed, throw error
+    // Enhanced retry logic with exponential backoff and memory cleanup
+    while (retryCount <= MAX_RETRIES) {
+      try {
+        // Wrap transcription in memory management
+        transcriptionResults = await withMemoryManagement(
+          () => this.performVideoTranscriptionMemoryOptimized(videoPath, fileSize),
+          { 
+            operation: 'video_transcription',
+            scriptId,
+            attempt: retryCount + 1,
+            fileSizeMB: memoryCheck.fileSizeMB
           }
-          
-          // Wait before retry (exponential backoff)
-          const delay = Math.pow(2, retryCount) * 1000; // 2s, 4s, 8s...
-          await new Promise(resolve => setTimeout(resolve, delay));
+        );
+        
+        break; // Success, exit retry loop
+        
+      } catch (transcriptionError) {
+        retryCount++;
+        
+        logWarn(`Video transcription attempt ${retryCount} failed`, { 
+          scriptId, 
+          error: transcriptionError.message,
+          retryCount,
+          maxRetries: MAX_RETRIES,
+          memoryStats: process.memoryUsage()
+        });
+        
+        // Force aggressive cleanup between retries
+        forceGarbageCollection();
+        
+        if (retryCount > MAX_RETRIES) {
+          throw new Error(
+            `Video transcription failed after ${MAX_RETRIES} attempts. ` +
+            `Last error: ${transcriptionError.message}`
+          );
         }
+        
+        // Exponential backoff with memory recovery time
+        const delay = Math.pow(2, retryCount) * 2000; // 4s, 8s, 16s...
+        logInfo(`Waiting ${delay}ms before retry for memory recovery`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-
-      // Calculate processing metrics
-      const processingTime = Date.now() - startTime;
-
-      // Update script with transcription results
-      script.originalContent.transcription = {
-        originalText: transcriptionResults.text,
-        cleanedText: this.cleanTranscriptionText(transcriptionResults.text),
-        speakerCount: this.estimateSpeakerCount(transcriptionResults.text),
-        language: transcriptionResults.language || 'en',
-        confidence: transcriptionResults.confidence || 0.85,
-        processingTime,
-        transcribedAt: new Date()
-      };
-
-      // Set briefText for AI processing
-      script.originalContent.briefText = script.originalContent.transcription.cleanedText;
-
-      await script.save();
-
-      logInfo('Video transcription completed successfully', { 
-        scriptId, 
-        processingTime,
-        textLength: transcriptionResults.text.length,
-        retryCount
-      });
-
-      return script.originalContent.transcription;
-
-    } catch (error) {
-      logError('Video transcription failed after all retries', { 
-        scriptId, 
-        error: error.message,
-        retryCount 
-      });
-      
-      // Update script status to failed
-      await Script.findByIdAndUpdate(scriptId, {
-        'originalContent.transcription.processingTime': Date.now() - Date.now(),
-        'originalContent.transcription.transcribedAt': new Date(),
-        'originalContent.transcription.originalText': '',
-        'originalContent.transcription.cleanedText': 'Transcription failed: ' + error.message
-      });
-      
-      throw error;
     }
+
+    // Update script with transcription results
+    script.originalContent.transcription = {
+      originalText: transcriptionResults.text,
+      cleanedText: this.cleanTranscriptionText(transcriptionResults.text),
+      speakerCount: this.estimateSpeakerCount(transcriptionResults.text),
+      language: transcriptionResults.language || 'en',
+      confidence: transcriptionResults.confidence || 0.85,
+      processingTime: transcriptionResults.processingTime,
+      transcribedAt: new Date(),
+      fileSizeMB: memoryCheck.fileSizeMB,
+      retryCount
+    };
+
+    script.originalContent.briefText = script.originalContent.transcription.cleanedText;
+    await script.save();
+
+    // Aggressive cleanup after successful transcription
+    await this.cleanupVideoFileImmediate(videoPath, scriptId);
+    forceGarbageCollection();
+
+    logInfo('Video transcription completed successfully with memory management', { 
+      scriptId, 
+      processingTime: transcriptionResults.processingTime,
+      textLength: transcriptionResults.text.length,
+      retryCount,
+      finalMemoryMB: Math.round(process.memoryUsage().heapUsed / (1024 * 1024))
+    });
+
+    return script.originalContent.transcription;
+
+  } catch (error) {
+    logError('Video transcription failed after all retries', { 
+      scriptId, 
+      error: error.message,
+      retryCount,
+      memoryUsage: process.memoryUsage()
+    });
+    
+    // Update script with failure info
+    if (script) {
+      try {
+        await Script.findByIdAndUpdate(scriptId, {
+          'originalContent.transcription': {
+            processingTime: 0,
+            transcribedAt: new Date(),
+            originalText: '',
+            cleanedText: `Transcription failed: ${error.message}`,
+            error: error.message,
+            retryCount
+          }
+        });
+      } catch (updateError) {
+        logError('Failed to update script with error info', { scriptId, updateError: updateError.message });
+      }
+    }
+    
+    // Force cleanup on error
+    forceGarbageCollection();
+    throw error;
   }
+}
+
+/**
+ * Memory-optimized video transcription using streaming approach
+ */
+async performVideoTranscriptionMemoryOptimized(videoPath, fileSize) {
+  const startTime = Date.now();
+  const fileSizeMB = Math.round(fileSize / (1024 * 1024) * 100) / 100;
+  
+  try {
+    logInfo('Starting memory-optimized video transcription', { 
+      filePath: path.basename(videoPath),
+      fileSizeMB,
+      maxFileSizeMB: 100 // Whisper API limit
+    });
+
+    // Check file size limits for Whisper API
+    if (fileSize > 100 * 1024 * 1024) { // 100MB limit
+      throw new Error(`Video file too large for transcription. Maximum size is 100MB, got ${fileSizeMB}MB.`);
+    }
+
+    // Create read stream with memory management options
+    const videoStream = createReadStream(videoPath, {
+      highWaterMark: 64 * 1024, // 64KB chunks instead of default 64KB
+      autoClose: true
+    });
+
+    // Handle stream errors
+    videoStream.on('error', (streamError) => {
+      logError('Video stream error', { error: streamError.message });
+      throw new Error(`Video stream error: ${streamError.message}`);
+    });
+
+    // Track stream progress for large files
+    let bytesRead = 0;
+    videoStream.on('data', (chunk) => {
+      bytesRead += chunk.length;
+      const progress = Math.round((bytesRead / fileSize) * 100);
+      
+      if (progress % 25 === 0) { // Log every 25%
+        logInfo(`Video streaming progress: ${progress}%`, {
+          bytesReadMB: Math.round(bytesRead / (1024 * 1024)),
+          totalMB: fileSizeMB
+        });
+      }
+    });
+
+    // Call Whisper API with optimized settings
+    const transcription = await openai.audio.transcriptions.create({
+      file: videoStream,
+      model: "whisper-1",
+      response_format: "verbose_json",
+      timestamp_granularities: ["segment"], // Use segments instead of words to reduce memory
+      language: "en" // Specify language to improve performance
+    });
+
+    // Close stream immediately after use
+    videoStream.destroy();
+
+    const processingTime = Date.now() - startTime;
+
+    logInfo('Whisper API transcription successful with memory optimization', { 
+      duration: transcription.duration,
+      language: transcription.language,
+      processingTime,
+      segmentCount: transcription.segments?.length || 0
+    });
+
+    return {
+      text: transcription.text,
+      language: transcription.language,
+      duration: transcription.duration,
+      segments: transcription.segments || [],
+      confidence: this.calculateAverageConfidenceFromSegments(transcription.segments),
+      processingTime
+    };
+
+  } catch (error) {
+    logError('Memory-optimized transcription failed', { 
+      error: error.message,
+      filePath: path.basename(videoPath),
+      fileSize: fileSizeMB,
+      processingTime: Date.now() - startTime
+    });
+    
+    // Handle specific OpenAI errors
+    if (error.code === 'file_size_exceeded') {
+      throw new Error(`Video file too large for transcription service: ${fileSizeMB}MB`);
+    } else if (error.code === 'invalid_request_error') {
+      throw new Error('Invalid video format or corrupted file');
+    } else if (error.message.includes('timeout')) {
+      throw new Error('Transcription service timeout - file may be too complex');
+    }
+    
+    throw new Error(`Video transcription failed: ${error.message}`);
+  }
+}
+
+/**
+ * Calculate average confidence from segments instead of words
+ */
+calculateAverageConfidenceFromSegments(segments) {
+  if (!segments || segments.length === 0) return 0.8; // Default confidence
+  
+  // Segments don't have confidence in Whisper API, so estimate based on other factors
+  const avgSegmentLength = segments.reduce((sum, seg) => sum + seg.text.length, 0) / segments.length;
+  const hasLongPauses = segments.some(seg => seg.end - seg.start > 10); // 10+ second segments
+  
+  // Estimate confidence based on segment characteristics
+  let confidence = 0.85; // Base confidence
+  
+  if (avgSegmentLength < 10) confidence -= 0.1; // Very short segments indicate poor quality
+  if (hasLongPauses) confidence -= 0.05; // Long pauses might indicate unclear audio
+  if (segments.length < 3) confidence -= 0.1; // Very few segments for the duration
+  
+  return Math.max(0.6, Math.min(0.95, confidence)); // Clamp between 60-95%
+}
+
+/**
+ * Immediate cleanup of video file after processing
+ */
+async cleanupVideoFileImmediate(videoPath, scriptId) {
+  try {
+    if (videoPath && (videoPath.includes('/uploads/') || videoPath.includes('\\uploads\\'))) {
+      await fs.unlink(videoPath);
+      
+      logInfo('Video file cleaned up immediately after transcription', { 
+        scriptId, 
+        videoPath: path.basename(videoPath)
+      });
+    }
+  } catch (error) {
+    logWarn('Failed to cleanup video file immediately', { 
+      scriptId, 
+      videoPath: path.basename(videoPath),
+      error: error.message 
+    });
+  }
+}
+
+/**
+ * Enhanced memory check specifically for video processing
+ */
+checkVideoProcessingMemory(fileSize) {
+  const usage = process.memoryUsage();
+  const fileSizeMB = fileSize / (1024 * 1024);
+  const heapUsedMB = usage.heapUsed / (1024 * 1024);
+  const heapTotalMB = usage.heapTotal / (1024 * 1024);
+  const availableHeapMB = heapTotalMB - heapUsedMB;
+  
+  // Require minimum memory thresholds for video processing
+  const minRequiredMB = Math.max(100, fileSizeMB * 2); // At least 100MB or 2x file size
+  const criticalThresholdPercent = 85;
+  const currentUsagePercent = (heapUsedMB / heapTotalMB) * 100;
+  
+  const canProcess = (
+    availableHeapMB >= minRequiredMB &&
+    currentUsagePercent < criticalThresholdPercent
+  );
+  
+  logInfo('Video processing memory check', {
+    fileSizeMB: Math.round(fileSizeMB * 100) / 100,
+    heapUsedMB: Math.round(heapUsedMB),
+    heapTotalMB: Math.round(heapTotalMB),
+    availableHeapMB: Math.round(availableHeapMB),
+    minRequiredMB: Math.round(minRequiredMB),
+    currentUsagePercent: Math.round(currentUsagePercent),
+    canProcess
+  });
+  
+  return {
+    canProcess,
+    availableHeapMB: Math.round(availableHeapMB),
+    requiredMB: Math.round(minRequiredMB),
+    currentUsagePercent: Math.round(currentUsagePercent),
+    recommendation: canProcess 
+      ? 'Memory sufficient for processing'
+      : 'Insufficient memory - try smaller file or restart server'
+  };
+}
+
+/**
+ * Clean up video file after successful processing
+ * @param {String} videoPath - Path to video file
+ * @param {String} scriptId - Script ID for logging
+ */
+async cleanupVideoFile(videoPath, scriptId) {
+  try {
+    // Only delete if file is in uploads directory and older than 1 hour
+    if (videoPath.includes('/uploads/') || videoPath.includes('\\uploads\\')) {
+      const stats = await fs.stat(videoPath);
+      const hourAgo = Date.now() - (60 * 60 * 1000);
+      
+      if (stats.birthtime.getTime() < hourAgo) {
+        await fs.unlink(videoPath);
+        logInfo('Video file cleaned up after transcription', { 
+          scriptId, 
+          videoPath: path.basename(videoPath)
+        });
+      }
+    }
+  } catch (error) {
+    // Log warning but don't throw - cleanup failure shouldn't stop the process
+    logWarn('Failed to cleanup video file', { 
+      scriptId, 
+      videoPath: path.basename(videoPath),
+      error: error.message 
+    });
+  }
+}
+
+/**
+ * Memory usage monitoring utility
+ * @returns {Object} Memory usage statistics
+ */
+getMemoryUsage() {
+  const usage = process.memoryUsage();
+  return {
+    heapUsedMB: Math.round(usage.heapUsed / 1024 / 1024 * 100) / 100,
+    heapTotalMB: Math.round(usage.heapTotal / 1024 / 1024 * 100) / 100,
+    heapUsagePercent: Math.round((usage.heapUsed / usage.heapTotal) * 100),
+    rssMB: Math.round(usage.rss / 1024 / 1024 * 100) / 100
+  };
+}
+
+/**
+ * Check if system has enough memory for video processing
+ * @param {Number} fileSize - File size in bytes
+ * @returns {Boolean} Has enough memory
+ */
+hasEnoughMemoryForProcessing(fileSize) {
+  const memUsage = this.getMemoryUsage();
+  const fileSizeMB = fileSize / (1024 * 1024);
+  
+  // Require at least 3x file size in available heap memory
+  const requiredHeapMB = fileSizeMB * 3;
+  const availableHeapMB = (process.memoryUsage().heapTotal - process.memoryUsage().heapUsed) / (1024 * 1024);
+  
+  logInfo('Memory check for video processing', {
+    fileSizeMB: Math.round(fileSizeMB * 100) / 100,
+    requiredHeapMB: Math.round(requiredHeapMB * 100) / 100,
+    availableHeapMB: Math.round(availableHeapMB * 100) / 100,
+    currentHeapUsage: `${memUsage.heapUsagePercent}%`
+  });
+  
+  return availableHeapMB >= requiredHeapMB;
+}
 
   /**
-   * Core Video Transcription Logic using Whisper API
-   * @param {String} videoPath - Path to video file
-   * @returns {Object} Transcription data
-   */
-  async performVideoTranscription(videoPath) {
-    try {
-      const videoBuffer = await fs.readFile(videoPath);
-      
-      const transcription = await openai.audio.transcriptions.create({
-        file: videoBuffer,
-        model: "whisper-1",
-        response_format: "verbose_json",
-        timestamp_granularities: ["word"]
-      });
+ * Core Video Transcription Logic using Whisper API with memory optimization
+ * @param {String} videoPath - Path to video file
+ * @returns {Object} Transcription data
+ */
+async performVideoTranscription(videoPath) {
+  let fileStats;
+  
+  try {
+    // Check file exists and get stats
+    fileStats = await fs.stat(videoPath);
+    
+    logInfo('Starting video transcription', { 
+      filePath: videoPath,
+      fileSizeMB: Math.round(fileStats.size / (1024 * 1024) * 100) / 100
+    });
 
-      logInfo('Whisper API transcription successful', { 
-        duration: transcription.duration,
-        language: transcription.language 
-      });
-
-      return {
-        text: transcription.text,
-        language: transcription.language,
-        duration: transcription.duration,
-        words: transcription.words,
-        confidence: this.calculateAverageConfidence(transcription.words)
-      };
-
-    } catch (error) {
-      logError('Whisper API transcription failed', { error: error.message });
-      throw new Error('Video transcription failed: ' + error.message);
+    // For larger files, use streaming approach
+    if (fileStats.size > 50 * 1024 * 1024) { // 50MB threshold
+      throw new Error('Video file too large. Maximum size is 50MB for transcription.');
     }
+
+    // Use createReadStream instead of loading entire file into memory
+    const videoStream = createReadStream(videoPath);
+    
+    const transcription = await openai.audio.transcriptions.create({
+      file: videoStream,
+      model: "whisper-1",
+      response_format: "verbose_json",
+      timestamp_granularities: ["word"]
+    });
+
+    // Clean up stream
+    videoStream.destroy();
+
+    logInfo('Whisper API transcription successful', { 
+      duration: transcription.duration,
+      language: transcription.language 
+    });
+
+    return {
+      text: transcription.text,
+      language: transcription.language,
+      duration: transcription.duration,
+      words: transcription.words,
+      confidence: this.calculateAverageConfidence(transcription.words)
+    };
+
+  } catch (error) {
+    logError('Whisper API transcription failed', { 
+      error: error.message,
+      filePath: videoPath,
+      fileSize: fileStats?.size 
+    });
+    throw new Error('Video transcription failed: ' + error.message);
   }
+}
 
   /**
    * Clean and format transcription text

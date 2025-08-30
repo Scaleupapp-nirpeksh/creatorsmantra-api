@@ -17,6 +17,7 @@ const {
   logInfo,
   logError
 } = require('../../shared/utils');
+const { checkMemoryLimits } = require('../../shared/memoryMonitor');
 
 // ============================================
 // SCRIPT CREATION CONTROLLERS
@@ -118,10 +119,7 @@ const createFileScript = asyncHandler(async (req, res) => {
   );
 });
 
-/**
- * Create Script from Video Transcription
- * POST /api/scripts/create-video
- */
+// Enhanced video script creation controller
 const createVideoScript = asyncHandler(async (req, res) => {
   if (!req.file) {
     return res.status(400).json(
@@ -129,49 +127,134 @@ const createVideoScript = asyncHandler(async (req, res) => {
     );
   }
 
-  const { title, platform, granularityLevel, targetDuration, customDuration, creatorStyleNotes, tags } = req.body;
+  // Final memory check before processing
+  const memoryStatus = checkMemoryLimits();
+  if (!memoryStatus.canProcess) {
+    // Clean up uploaded file
+    const fs = require('fs');
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (cleanupError) {
+      logError('Failed to cleanup file after memory check failure', { 
+        error: cleanupError.message,
+        filePath: req.file.path
+      });
+    }
+
+    return res.status(503).json({
+      success: false,
+      message: 'Server memory capacity exceeded. Please try again later with a smaller file.',
+      code: 503,
+      memoryStats: memoryStatus.stats,
+      retryAfter: 900, // 15 minutes
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // Parse JSON fields from multipart form data
+  
+  const { title, platform, granularityLevel, targetDuration, customDuration, creatorStyleNotes, tags, notes, dealId } = req.body;
+  
   const userId = req.user.id;
   const videoData = {
     ...req.file,
     subscriptionTier: req.user.subscriptionTier
   };
 
-  logInfo('Creating video script', { 
+  logInfo('Creating video script with memory management', { 
     userId, 
     filename: req.file.filename,
-    fileSize: req.file.size 
+    fileSize: req.file.size,
+    memoryStats: memoryStatus.stats
   });
 
-  const scriptData = {
-    title: title?.trim() || req.file.originalname,
-    platform,
-    granularityLevel: granularityLevel || 'detailed',
-    targetDuration: targetDuration || '60_seconds',
-    customDuration,
-    creatorStyleNotes: creatorStyleNotes || '',
-    tags: tags || [],
-    subscriptionTier: req.user.subscriptionTier
-  };
+  try {
+    const scriptData = {
+      title: title?.trim() || req.file.originalname,
+      platform,
+      granularityLevel: granularityLevel || 'detailed',
+      targetDuration: targetDuration || '60_seconds',
+      customDuration: customDuration ? parseInt(customDuration) : undefined,
+      creatorStyleNotes: creatorStyleNotes || '',
+      tags: tags || [],
+      notes: notes || '',
+      dealId: dealId || undefined,
+      subscriptionTier: req.user.subscriptionTier
+    };
 
-  const script = await ScriptGeneratorService.createVideoScript(videoData, scriptData, userId);
+    const script = await ScriptGeneratorService.createVideoScript(videoData, scriptData, userId);
 
-  res.status(201).json(
-    successResponse('Video script created successfully', {
-      script: {
-        id: script._id,
-        scriptId: script.scriptId,
-        title: script.title,
-        status: script.status,
-        inputType: script.inputType,
-        platform: script.platform,
-        aiGenerationStatus: script.aiGeneration.status,
-        videoFileName: script.originalContent.videoFile.originalName,
-        videoFileSize: script.originalContent.videoFile.fileSize,
-        createdAt: script.createdAt
+    // Success response
+    res.status(201).json(
+      successResponse('Video script created successfully', {
+        script: {
+          id: script._id,
+          scriptId: script.scriptId,
+          title: script.title,
+          status: script.status,
+          inputType: script.inputType,
+          platform: script.platform,
+          aiGenerationStatus: script.aiGeneration.status,
+          videoFileName: script.originalContent.videoFile.originalName,
+          videoFileSize: script.originalContent.videoFile.fileSize,
+          createdAt: script.createdAt,
+          memoryOptimized: true
+        }
+      })
+    );
+
+  } catch (error) {
+    logError('Video script creation failed', {
+      error: error.message,
+      userId,
+      filename: req.file?.filename,
+      fileSize: req.file?.size,
+      memoryUsage: process.memoryUsage()
+    });
+
+    // Clean up uploaded file on error
+    if (req.file && req.file.path) {
+      const fs = require('fs');
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (cleanupError) {
+        logError('Failed to cleanup file after error', { 
+          error: cleanupError.message,
+          filePath: req.file.path
+        });
       }
-    })
-  );
+    }
+
+    // Force garbage collection on error
+    if (global.gc) {
+      global.gc();
+    }
+
+    // Return appropriate error based on error type
+    if (error.message.includes('memory') || error.message.includes('Memory')) {
+      return res.status(507).json({
+        success: false,
+        message: 'Insufficient memory for video processing. Try a smaller file or try again later.',
+        code: 507,
+        recommendation: 'Use a file smaller than 25MB or try again during off-peak hours',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (error.message.includes('limit exceeded') || error.message.includes('subscription')) {
+      return res.status(403).json({
+        success: false,
+        message: error.message,
+        code: 403,
+        upgrade: true,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    throw error;
+  }
 });
+
 
 // ============================================
 // SCRIPT RETRIEVAL CONTROLLERS

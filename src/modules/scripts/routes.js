@@ -21,6 +21,8 @@ const {
   authorizeSubscription,
   validateRequest
 } = require('../../shared/middleware');
+const { checkMemoryLimits, canHandleFileSize } = require('../../shared/memoryMonitor');
+const { parseMultipartJson } = require('../../shared/multipartParser');
 const { logInfo, logError } = require('../../shared/utils');
 const { rateLimitByTier } = require('../../shared/rateLimiter');
 
@@ -156,17 +158,30 @@ const createDocumentUploadMiddleware = (req, res, next) => {
   });
 };
 
-// Create video upload middleware
+// Create enhanced video upload middleware with memory pre-checks
 const createVideoUploadMiddleware = (req, res, next) => {
   // Get user's subscription tier for file size limit
   const subscriptionTier = req.user?.subscriptionTier || 'starter';
   
+  // Pre-upload memory check
+  const memoryStatus = checkMemoryLimits();
+  if (!memoryStatus.canProcess) {
+    return res.status(503).json({
+      success: false,
+      message: 'Server memory usage too high for video processing. Please try again later.',
+      code: 503,
+      memoryStats: memoryStatus.stats,
+      retryAfter: 600, // 10 minutes
+      timestamp: new Date().toISOString()
+    });
+  }
+
   const sizeLimits = {
     starter: 5 * 1024 * 1024,      // 5MB (no video support)
     pro: 25 * 1024 * 1024,         // 25MB
-    elite: 100 * 1024 * 1024,      // 100MB
-    agency_starter: 100 * 1024 * 1024, // 100MB
-    agency_pro: 200 * 1024 * 1024  // 200MB
+    elite: 50 * 1024 * 1024,       // 50MB (reduced from 100MB)
+    agency_starter: 50 * 1024 * 1024, // 50MB
+    agency_pro: 75 * 1024 * 1024   // 75MB (reduced from 200MB)
   };
 
   // Check if video transcription is available for tier
@@ -177,27 +192,61 @@ const createVideoUploadMiddleware = (req, res, next) => {
       success: false,
       message: 'Video transcription not available in your subscription tier',
       code: 403,
+      upgrade: true,
       timestamp: new Date().toISOString()
     });
   }
 
   const upload = multer({
     storage: videoStorage,
-    fileFilter: videoFileFilter,
+    fileFilter: (req, file, cb) => {
+      // Enhanced file filter with memory consideration
+      const allowedMimeTypes = [
+        'video/mp4',
+        'video/mov',
+        'video/avi',
+        'video/quicktime',
+        'video/x-msvideo'
+      ];
+      
+      if (!allowedMimeTypes.includes(file.mimetype)) {
+        cb(new Error('Invalid video type. Only MP4, MOV, and AVI files are allowed.'), false);
+        return;
+      }
+
+      // Pre-check estimated file size impact on memory
+      const estimatedSize = parseInt(req.headers['content-length'] || '0');
+      if (estimatedSize > 0) {
+        const memoryCheck = canHandleFileSize(estimatedSize);
+        if (!memoryCheck.canHandle) {
+          cb(new Error(
+            `File too large for current system memory. ` +
+            `File: ${memoryCheck.fileSizeMB}MB, Available: ${memoryCheck.availableHeapMB}MB, ` +
+            `Required: ${memoryCheck.requiredMemoryMB}MB`
+          ), false);
+          return;
+        }
+      }
+
+      cb(null, true);
+    },
     limits: {
       fileSize: sizeLimits[subscriptionTier] || sizeLimits.starter,
       files: 1
     }
-  }).single('videoFile'); // Field name for video upload
+  }).single('videoFile');
 
+  // Enhanced upload with memory monitoring
   upload(req, res, (err) => {
     if (err instanceof multer.MulterError) {
       if (err.code === 'LIMIT_FILE_SIZE') {
         const maxSizeMB = Math.round(sizeLimits[subscriptionTier] / (1024 * 1024));
-        return res.status(400).json({
+        return res.status(413).json({
           success: false,
           message: `Video size exceeds limit of ${maxSizeMB}MB for ${subscriptionTier} plan`,
-          code: 400,
+          code: 413,
+          maxSizeAllowed: maxSizeMB,
+          upgrade: subscriptionTier === 'starter' || subscriptionTier === 'pro',
           timestamp: new Date().toISOString()
         });
       }
@@ -217,6 +266,30 @@ const createVideoUploadMiddleware = (req, res, next) => {
         code: 400,
         timestamp: new Date().toISOString()
       });
+    }
+
+    // Post-upload memory check with file size
+    if (req.file) {
+      const finalMemoryCheck = canHandleFileSize(req.file.size);
+      if (!finalMemoryCheck.canHandle) {
+        // Clean up uploaded file immediately
+        const fs = require('fs');
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch (cleanupError) {
+          console.error('Failed to cleanup uploaded file:', cleanupError);
+        }
+        
+        return res.status(413).json({
+          success: false,
+          message: `Video too large for current system capacity. Please try again later or use a smaller file.`,
+          code: 413,
+          fileSizeMB: Math.round(req.file.size / (1024 * 1024)),
+          availableMemoryMB: Math.round(finalMemoryCheck.availableHeapMB),
+          requiredMemoryMB: Math.round(finalMemoryCheck.requiredMemoryMB),
+          timestamp: new Date().toISOString()
+        });
+      }
     }
     
     next();
@@ -246,6 +319,7 @@ router.post('/create-file',
   authenticateUser,
   rateLimitByTier('script_creation'),
   createDocumentUploadMiddleware, // Document upload handling
+  parseMultipartJson(['tags']),
   validateRequest(scriptValidation.createFileScriptSchema),
   scriptController.createFileScript
 );
@@ -259,6 +333,7 @@ router.post('/create-video',
   authorizeSubscription(['pro', 'elite', 'agency_starter', 'agency_pro']), // Video transcription for premium tiers
   rateLimitByTier('script_creation'),
   createVideoUploadMiddleware, // Video upload handling
+  parseMultipartJson(['tags']),
   validateRequest(scriptValidation.createVideoScriptSchema),
   scriptController.createVideoScript
 );

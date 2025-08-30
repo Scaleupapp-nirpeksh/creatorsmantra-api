@@ -1,4 +1,5 @@
 /**
+ * src/app.js
  * CreatorsMantra Backend - Main Application
  * Express.js application setup with middleware and routes
  * Enhanced with Invoice Module Support, Brief Module Support, Analytics Module, Scripts Module & Production Features
@@ -25,6 +26,8 @@ const {
 } = require('./shared/middleware');
 const { logInfo, logWarn, logError, successResponse } = require('./shared/utils');
 const { rateLimitByTier } = require('./shared/rateLimiter');
+const { memoryMonitor, forceGarbageCollection, checkMemoryLimits } = require('./shared/memoryMonitor');
+const { parseMultipartJson } = require('./shared/multipartParser');
 
 // ============================================
 // CREATE EXPRESS APPLICATION
@@ -67,8 +70,10 @@ app.use(jsonParser);
 
 // URL encoded parser
 app.use(urlencodedParser);
+app.use(memoryMonitor);
 
 logInfo('📝 Request parsing middleware loaded');
+logInfo('🧠 Memory monitoring middleware loaded');
 
 // Rate limiting is now available via shared/rateLimiter.js
 logInfo('⚡ Rate limiting by subscription tier configured');
@@ -902,9 +907,27 @@ try {
 // Scripts routes - NEW MODULE
 try {
   const scriptsRoutes = require('./modules/scripts/routes');
+  
+  // Apply memory checks and multipart parsing before scripts routes
+  app.use(`${API_PREFIX}/scripts`, (req, res, next) => {
+    // Check memory before processing scripts requests
+    if (req.url.includes('create-video') || req.url.includes('create-file')) {
+      const memoryOK = checkMemoryLimits();
+      if (!memoryOK) {
+        return res.status(503).json({
+          success: false,
+          message: 'Server memory usage too high. Please try again later.',
+          code: 503,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+    next();
+  });
+  
   app.use(`${API_PREFIX}/scripts`, scriptsRoutes);
   logInfo('✅ Scripts routes loaded successfully');
-  logInfo('📝 Scripts features enabled: AI Script Generation, Video Transcription, Multi-Platform Optimization, A/B Testing, Trend Integration');
+  logInfo('📝 Scripts features enabled: AI Script Generation, Video Transcription, Multi-Platform Optimization, A/B Testing, Trend Integration, Memory Management');
   loadedModules++;
 } catch (error) {
   logWarn('⚠️  Scripts routes not found - module may not be implemented yet', { error: error.message });
@@ -2060,11 +2083,18 @@ const initializeAnalyticsServices = async () => {
 // ============================================
 
 /**
- * Initialize scripts-specific services
+ * Initialize scripts-specific services with enhanced memory management
  */
 const initializeScriptsServices = async () => {
   try {
     logInfo('📝 Initializing scripts services...');
+    
+    // Check initial memory state
+    const initialMemory = process.memoryUsage();
+    logInfo('Initial memory usage for scripts:', {
+      heapUsedMB: Math.round(initialMemory.heapUsed / 1024 / 1024),
+      heapTotalMB: Math.round(initialMemory.heapTotal / 1024 / 1024)
+    });
     
     // Initialize script file cleanup job
     cron.schedule('0 3 * * 1', async () => { // Every Monday at 3 AM
@@ -2074,26 +2104,54 @@ const initializeScriptsServices = async () => {
         const fs = require('fs').promises;
         const path = require('path');
         const scriptsUploadsDir = path.join(__dirname, '../uploads/scripts');
+        const videosUploadsDir = path.join(__dirname, '../uploads/videos');
         
+        let totalCleaned = 0;
+        
+        // Clean script files
         try {
           const files = await fs.readdir(scriptsUploadsDir);
           const now = Date.now();
           const sixtyDaysAgo = now - (60 * 24 * 60 * 60 * 1000);
           
-          let cleanedCount = 0;
           for (const file of files) {
             const filePath = path.join(scriptsUploadsDir, file);
             const stats = await fs.stat(filePath);
             
             if (stats.mtime.getTime() < sixtyDaysAgo) {
               await fs.unlink(filePath);
-              cleanedCount++;
+              totalCleaned++;
             }
           }
-          
-          logInfo(`✅ Script file cleanup completed - removed ${cleanedCount} old files`);
         } catch (error) {
-          logWarn('⚠️  Scripts uploads directory not found or cleanup failed', { error: error.message });
+          logWarn('Scripts uploads directory not found', { error: error.message });
+        }
+        
+        // Clean video files
+        try {
+          const videoFiles = await fs.readdir(videosUploadsDir);
+          const now = Date.now();
+          const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000); // Videos cleaned more aggressively
+          
+          for (const file of videoFiles) {
+            const filePath = path.join(videosUploadsDir, file);
+            const stats = await fs.stat(filePath);
+            
+            if (stats.mtime.getTime() < thirtyDaysAgo) {
+              await fs.unlink(filePath);
+              totalCleaned++;
+            }
+          }
+        } catch (error) {
+          logWarn('Videos uploads directory not found', { error: error.message });
+        }
+        
+        logInfo(`✅ Script file cleanup completed - removed ${totalCleaned} old files`);
+        
+        // Force garbage collection after cleanup
+        if (global.gc) {
+          global.gc();
+          logInfo('Garbage collection forced after file cleanup');
         }
         
       } catch (error) {
@@ -2103,7 +2161,7 @@ const initializeScriptsServices = async () => {
       timezone: 'Asia/Kolkata'
     });
     
-    // Initialize AI script processing queue cleanup
+    // Initialize AI script processing queue cleanup with memory management
     if (config.featureFlags?.aiFeatures) {
       cron.schedule('0 8 * * *', async () => {
         try {
@@ -2119,11 +2177,19 @@ const initializeScriptsServices = async () => {
               updatedAt: { $lt: thirtyMinutesAgo }
             },
             {
-              $set: { 'aiGeneration.status': 'failed' }
+              $set: { 
+                'aiGeneration.status': 'failed',
+                'aiGeneration.processingMetadata.lastError': 'Processing timeout - likely memory issue'
+              }
             }
           );
           
           logInfo(`✅ AI script processing cleanup completed - reset ${result.modifiedCount} stuck processes`);
+          
+          // Force garbage collection after cleanup
+          if (global.gc) {
+            global.gc();
+          }
           
         } catch (error) {
           logError('❌ AI script processing cleanup failed', { error: error.message });
@@ -2146,13 +2212,18 @@ const initializeScriptsServices = async () => {
         const scripts = await Script.find({
           'aiGeneration.status': 'completed',
           status: 'draft'
-        });
+        }).limit(100); // Process in batches to manage memory
         
         let updatedCount = 0;
         for (const script of scripts) {
           script.status = 'generated';
           await script.save();
           updatedCount++;
+          
+          // Force GC every 50 scripts to manage memory
+          if (updatedCount % 50 === 0 && global.gc) {
+            global.gc();
+          }
         }
         
         logInfo(`✅ Script analytics updated - ${updatedCount} scripts marked as generated`);
@@ -2164,51 +2235,23 @@ const initializeScriptsServices = async () => {
       timezone: 'Asia/Kolkata'
     });
     
-    // Initialize video transcription cleanup job (weekly)
-    if (config.featureFlags?.aiFeatures) {
-      cron.schedule('0 4 * * 0', async () => { // Sunday at 4 AM
-        try {
-          logInfo('🎥 Cleaning up processed video files...');
-          
-          const { Script } = require('./modules/scripts/model');
-          
-          // Find scripts with completed transcription older than 30 days
-          const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-          const oldScripts = await Script.find({
-            inputType: 'video_transcription',
-            'originalContent.transcription.transcribedAt': { $lt: thirtyDaysAgo }
-          });
-          
-          let cleanedCount = 0;
-          for (const script of oldScripts) {
-            try {
-              const fs = require('fs').promises;
-              if (script.originalContent.videoFile.uploadPath) {
-                await fs.unlink(script.originalContent.videoFile.uploadPath);
-                cleanedCount++;
-              }
-            } catch (error) {
-              logWarn('Failed to cleanup video file', { 
-                scriptId: script._id, 
-                error: error.message 
-              });
-            }
-          }
-          
-          logInfo(`✅ Video file cleanup completed - removed ${cleanedCount} old video files`);
-          
-        } catch (error) {
-          logError('❌ Video file cleanup failed', { error: error.message });
-        }
-      }, {
-        timezone: 'Asia/Kolkata'
-      });
+    // Initialize memory monitoring specifically for scripts processing
+    cron.schedule('*/15 * * * *', () => { // Every 15 minutes
+      const usage = process.memoryUsage();
+      const heapUsedPercent = (usage.heapUsed / usage.heapTotal) * 100;
       
-      logInfo('🎥 Video file cleanup cron job scheduled (weekly on Sunday at 4 AM IST)');
-    }
+      if (heapUsedPercent > 80) {
+        logWarn('High memory usage detected in scripts processing', {
+          heapUsedPercent: Math.round(heapUsedPercent),
+          heapUsedMB: Math.round(usage.heapUsed / 1024 / 1024),
+          recommendation: 'Consider restarting if memory usage continues to rise'
+        });
+      }
+    });
     
     logInfo('📝 Script file cleanup cron job scheduled (weekly on Monday)');
     logInfo('📊 Script analytics cron job scheduled (daily at 10 AM IST)');
+    logInfo('🧠 Script memory monitoring cron job scheduled (every 15 minutes)');
     
     return true;
   } catch (error) {
@@ -2218,11 +2261,35 @@ const initializeScriptsServices = async () => {
 };
 
 /**
- * Validate scripts environment and dependencies (NEW)
+ * Validate scripts environment and dependencies with memory checks
  */
 const validateScriptsEnvironment = () => {
   const warnings = [];
   const errors = [];
+  
+  // Check memory availability
+  const usage = process.memoryUsage();
+  const heapTotalMB = Math.round(usage.heapTotal / 1024 / 1024);
+  const heapUsedMB = Math.round(usage.heapUsed / 1024 / 1024);
+  
+  logInfo('Scripts environment memory check:', {
+    heapTotalMB,
+    heapUsedMB,
+    availableMB: heapTotalMB - heapUsedMB
+  });
+  
+  if (heapTotalMB < 512) { // Less than 512MB total heap
+    errors.push('Insufficient memory for scripts processing. Minimum 512MB heap required.');
+  } else if (heapTotalMB < 1024) { // Less than 1GB
+    warnings.push('Low memory available - video transcription may fail for larger files');
+  }
+  
+  // Check if garbage collection is available
+  if (global.gc) {
+    logInfo('✅ Garbage collection available for memory management');
+  } else {
+    warnings.push('Garbage collection not available - memory management will be limited. Start with --expose-gc flag.');
+  }
   
   // Check AI processing requirements for script generation
   if (config.featureFlags?.aiFeatures) {
@@ -2235,7 +2302,6 @@ const validateScriptsEnvironment = () => {
   
   // Check MongoDB for scripts collections
   try {
-    // MongoDB is already initialized, script models will create collections as needed
     logInfo('✅ MongoDB available for scripts data storage');
   } catch (error) {
     errors.push('MongoDB not available - scripts data storage will fail');
@@ -2250,28 +2316,26 @@ const validateScriptsEnvironment = () => {
     errors.push('File processing libraries not installed - script file upload will fail');
   }
   
-  // Check upload directory
+  // Check and create upload directories
   const fs = require('fs');
   const path = require('path');
   const scriptsUploadsDir = path.join(__dirname, '../uploads/scripts');
+  const videosUploadsDir = path.join(__dirname, '../uploads/videos');
   
   try {
     if (!fs.existsSync(scriptsUploadsDir)) {
       fs.mkdirSync(scriptsUploadsDir, { recursive: true });
       logInfo('✅ Scripts uploads directory created');
-    } else {
-      logInfo('✅ Scripts uploads directory exists');
     }
+    
+    if (!fs.existsSync(videosUploadsDir)) {
+      fs.mkdirSync(videosUploadsDir, { recursive: true });
+      logInfo('✅ Videos uploads directory created');
+    }
+    
+    logInfo('✅ Upload directories verified');
   } catch (error) {
-    warnings.push('Cannot create scripts uploads directory - file uploads may fail');
-  }
-  
-  // Check memory for AI processing
-  const totalMemory = process.memoryUsage().heapTotal;
-  if (totalMemory < 200 * 1024 * 1024) { // Less than 200MB
-    warnings.push('Low memory available - AI script generation may be limited');
-  } else {
-    logInfo('✅ Sufficient memory available for AI script generation');
+    warnings.push('Cannot create upload directories - file uploads may fail');
   }
   
   // Check if deals module is available for script-deal linking

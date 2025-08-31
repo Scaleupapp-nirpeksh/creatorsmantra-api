@@ -194,28 +194,26 @@ class RateCardController {
     }
   });
 
-  /**
-   * Generate AI pricing suggestions
-   * POST /api/ratecards/ai-suggestions
-   */
   generateAISuggestions = asyncHandler(async (req, res) => {
     try {
       logInfo('Generate AI suggestions request', { 
         userId: req.user.id,
         metrics: req.body 
       });
-
-      // Check if user has access to AI features (Pro/Elite only)
-      if (!['pro', 'elite', 'agency_starter', 'agency_pro'].includes(req.user.subscription.plan)) {
+  
+      // Fix: Add null check for subscription
+      const userSubscription = req.user?.subscription?.plan || req.user?.subscriptionTier || 'starter';
+      
+      if (!['pro', 'elite', 'agency_starter', 'agency_pro'].includes(userSubscription)) {
         throw new AppError('AI suggestions are available for Pro and Elite plans only', 403);
       }
-
+  
       const suggestions = await RateCardService.generateAIPricingSuggestions(req.body);
-
+  
       if (!suggestions) {
         throw new AppError('Unable to generate suggestions. Please try again.', 500);
       }
-
+  
       res.json(
         successResponse('AI suggestions generated successfully', { suggestions })
       );
@@ -599,21 +597,18 @@ class RateCardController {
     }
   });
 
-  /**
-   * Get rate card templates
-   * GET /api/ratecards/templates
-   */
   getTemplates = asyncHandler(async (req, res) => {
     try {
       logInfo('Get templates request', { userId: req.user.id });
-
+  
+      // Fix: Handle case when creator doesn't have templates yet
       const templates = await RateCardService.RateCard.find({
         creator: req.user.id,
         isTemplate: true,
         isDeleted: false
-      }).select('title template createdAt');
-
-      // Also include system templates
+      }).select('title template createdAt').lean(); // Use lean() for better performance
+  
+      // System templates
       const systemTemplates = [
         {
           _id: 'system_fashion',
@@ -634,10 +629,10 @@ class RateCardController {
           system: true
         }
       ];
-
+  
       res.json(
         successResponse('Templates fetched successfully', {
-          userTemplates: templates,
+          userTemplates: templates || [],
           systemTemplates
         })
       );

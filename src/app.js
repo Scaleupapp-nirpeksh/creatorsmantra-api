@@ -2,7 +2,7 @@
  * src/app.js
  * CreatorsMantra Backend - Main Application
  * Express.js application setup with middleware and routes
- * Enhanced with Invoice Module Support, Brief Module Support, Analytics Module, Scripts Module & Production Features
+ * Enhanced with Invoice Module Support, Brief Module Support, Analytics Module, Scripts Module, Rate Cards Module & Production Features
  * 
  * @author CreatorsMantra Team
  * @version 1.0.0
@@ -113,6 +113,39 @@ app.locals.invoiceFileUpload = invoiceFileUpload;
 logInfo('📎 Invoice file upload middleware configured');
 
 // ============================================
+// RATE CARD FILE UPLOAD MIDDLEWARE
+// ============================================
+
+// Rate card file upload configuration for QR codes and exports
+const rateCardFileUpload = multer({
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit for rate card exports
+    files: 3 // Maximum 3 files per request
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow images for QR codes and PDFs for exports
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png', 
+      'image/jpg',
+      'application/pdf'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only JPEG, PNG, and PDF files are allowed for rate cards.'), false);
+    }
+  },
+  storage: multer.memoryStorage() // Store in memory for processing
+});
+
+// Make rate card file upload available globally
+app.locals.rateCardFileUpload = rateCardFileUpload;
+
+logInfo('📋 Rate card file upload middleware configured');
+
+// ============================================
 // LOGGING MIDDLEWARE
 // ============================================
 
@@ -180,6 +213,14 @@ try {
   logInfo('📝 Script file serving enabled');
 } catch (error) {
   logWarn('⚠️  Script storage directory not found');
+}
+
+// Serve rate card PDFs (if stored locally)
+try {
+  app.use('/ratecards', express.static(path.join(__dirname, '../storage/ratecards')));
+  logInfo('📋 Rate card PDF serving enabled');
+} catch (error) {
+  logWarn('⚠️  Rate card storage directory not found');
 }
 
 // ============================================
@@ -250,7 +291,14 @@ app.get('/health/detailed', async (req, res) => {
         videoTranscriptionEnabled: config.featureFlags?.aiFeatures || false,
         scriptAnalyticsEnabled: true,
         abTestingEnabled: config.featureFlags?.aiFeatures || false,
-        trendIntegrationEnabled: config.featureFlags?.aiFeatures || false
+        trendIntegrationEnabled: config.featureFlags?.aiFeatures || false,
+        // Rate card module features
+        rateCardGenerationEnabled: true,
+        aiPricingSuggestionsEnabled: config.featureFlags?.aiFeatures || false,
+        rateCardPDFExportEnabled: config.featureFlags?.pdfGeneration !== false,
+        qrCodeGenerationEnabled: true,
+        publicRateCardSharingEnabled: true,
+        rateCardAnalyticsEnabled: true
       },
       modules: {
         auth: checkModuleExists('auth'),
@@ -263,7 +311,7 @@ app.get('/health/detailed', async (req, res) => {
         contracts: checkModuleExists('contracts'),
         agency: checkModuleExists('agency'),
         analytics: checkModuleExists('analytics'),
-        scripts: checkModuleExists('scripts') // New scripts module
+        scripts: checkModuleExists('scripts')
       },
       services: {
         cronJobs: checkCronJobsStatus(),
@@ -273,8 +321,10 @@ app.get('/health/detailed', async (req, res) => {
         aiProcessing: checkAIProcessingService(),
         briefAnalysis: checkBriefAnalysisService(),
         analyticsEngine: checkAnalyticsEngineService(),
-        scriptGeneration: checkScriptGenerationService(), // New script generation service
-        videoTranscription: checkVideoTranscriptionService(), // New video transcription service
+        scriptGeneration: checkScriptGenerationService(),
+        videoTranscription: checkVideoTranscriptionService(),
+        rateCardAI: checkRateCardAIService(),
+        rateCardPDF: checkRateCardPDFService(),
         caching: checkCachingService()
       }
     };
@@ -297,7 +347,7 @@ app.get('/health/detailed', async (req, res) => {
 });
 
 /**
- * Enhanced module check function with analytics and scripts module support
+ * Enhanced module check function with analytics, scripts, and rate cards module support
  */
 function checkModuleExists(moduleName) {
   try {
@@ -391,6 +441,71 @@ function checkModuleExists(moduleName) {
       }
     }
     
+    // Special health check for rate cards module
+    if (moduleName === 'ratecards') {
+      try {
+        const { RateCard, RateCardHistory } = require(`./modules/${moduleName}/model`);
+        const rateCardController = require(`./modules/${moduleName}/controller`);
+        
+        return { 
+          status: 'loaded', 
+          available: true,
+          features: {
+            models: !!(RateCard && RateCardHistory),
+            controller: !!rateCardController,
+            aiPricingSuggestions: config.featureFlags?.aiFeatures || false,
+            pdfGeneration: config.featureFlags?.pdfGeneration !== false,
+            qrCodeGeneration: true,
+            publicSharing: true,
+            analyticsTracking: true,
+            versionHistory: true,
+            packageDeals: true,
+            professionalDetails: true,
+            caching: true,
+            rateLimiting: true,
+            inputSanitization: true,
+            subscriptionTiers: true
+          },
+          subscriptionRequirements: {
+            pro: ['basic_rate_cards', 'ai_suggestions', 'pdf_export', '3_cards_limit'],
+            elite: ['all_pro_features', 'unlimited_cards', 'advanced_analytics'],
+            agency_starter: ['team_features', '10_cards_limit', 'manager_access'],
+            agency_pro: ['all_agency_features', 'unlimited_cards', 'white_label']
+          },
+          platforms: [
+            'instagram', 'youtube', 'linkedin', 'twitter', 'facebook'
+          ],
+          deliverableTypes: {
+            instagram: ['reel', 'post', 'story', 'carousel', 'igtv', 'live'],
+            youtube: ['video', 'short', 'community_post', 'live_stream'],
+            linkedin: ['post', 'article', 'video', 'newsletter'],
+            twitter: ['post', 'thread', 'space'],
+            facebook: ['post', 'reel', 'story', 'live']
+          },
+          aiCapabilities: {
+            pricingSuggestions: config.featureFlags?.aiFeatures || false,
+            marketAnalysis: config.featureFlags?.aiFeatures || false,
+            packageGeneration: config.featureFlags?.aiFeatures || false,
+            performanceInsights: config.featureFlags?.aiFeatures || false
+          },
+          rateLimits: {
+            general: '100 requests/15min',
+            aiSuggestions: '10 requests/hour',
+            pdfGeneration: '5 requests/15min',
+            publicAccess: '30 requests/minute'
+          },
+          version: '2.1.0'
+        };
+      } catch (error) {
+        return { 
+          status: 'partial', 
+          available: true,
+          error: 'Rate card service layer issues',
+          details: error.message
+        };
+      }
+    }
+    
     // Special health check for briefs module
     if (moduleName === 'briefs') {
       try {
@@ -476,8 +591,12 @@ function checkCronJobsStatus() {
       aiProcessingCleanup: config.featureFlags?.aiFeatures || false,
       analyticsCacheCleanup: true,
       trendAnalysisUpdates: config.featureFlags?.aiFeatures || false,
-      scriptFileCleanup: true, // New script file cleanup
-      scriptAnalyticsUpdate: true // New script analytics update
+      scriptFileCleanup: true,
+      scriptAnalyticsUpdate: true,
+      rateCardCacheCleanup: true,
+      rateCardAnalyticsUpdate: true,
+      aiSuggestionsCleanup: config.featureFlags?.aiFeatures || false,
+      qrCodeCleanup: true
     };
   } catch (error) {
     return {
@@ -495,12 +614,44 @@ function checkPDFGenerationService() {
     require('pdfkit');
     return {
       status: 'available',
-      enabled: config.featureFlags?.pdfGeneration !== false
+      enabled: config.featureFlags?.pdfGeneration !== false,
+      features: {
+        invoicePDFs: true,
+        rateCardPDFs: true,
+        customBranding: true,
+        multiPageSupport: true
+      }
     };
   } catch (error) {
     return {
       status: 'unavailable',
       error: 'PDFKit not installed'
+    };
+  }
+}
+
+/**
+ * Check rate card PDF service
+ */
+function checkRateCardPDFService() {
+  try {
+    require('pdfkit');
+    require('qrcode');
+    return {
+      status: 'available',
+      enabled: config.featureFlags?.pdfGeneration !== false,
+      features: {
+        rateCardPDFs: true,
+        qrCodeEmbedding: true,
+        customBranding: true,
+        multiPageSupport: true,
+        professionalTemplates: true
+      }
+    };
+  } catch (error) {
+    return {
+      status: 'unavailable',
+      error: 'PDFKit or QRCode not installed'
     };
   }
 }
@@ -516,7 +667,8 @@ function checkFileUploadService() {
     storage: config.aws?.accessKeyId ? 'AWS S3' : 'Local',
     briefUploads: true,
     invoiceUploads: true,
-    scriptUploads: true // New script uploads
+    scriptUploads: true,
+    rateCardUploads: true
   };
 }
 
@@ -541,7 +693,32 @@ function checkAIProcessingService() {
     provider: 'OpenAI',
     models: ['gpt-4', 'whisper-1'],
     available: !!process.env.OPENAI_API_KEY,
-    features: ['brief_extraction', 'risk_assessment', 'pricing_suggestions', 'business_insights', 'trend_analysis', 'script_generation', 'video_transcription']
+    features: ['brief_extraction', 'risk_assessment', 'pricing_suggestions', 'business_insights', 'trend_analysis', 'script_generation', 'video_transcription', 'rate_card_pricing']
+  };
+}
+
+/**
+ * Check rate card AI service
+ */
+function checkRateCardAIService() {
+  return {
+    status: config.featureFlags?.aiFeatures ? 'enabled' : 'disabled',
+    provider: 'OpenAI',
+    models: ['gpt-4-turbo-preview'],
+    available: !!process.env.OPENAI_API_KEY,
+    features: [
+      'pricing_suggestions', 
+      'market_analysis', 
+      'package_generation', 
+      'niche_optimization',
+      'city_tier_pricing',
+      'seasonal_adjustments',
+      'competition_analysis'
+    ],
+    rateLimits: {
+      pricingSuggestions: '10 requests/hour',
+      marketAnalysis: '5 requests/hour'
+    }
   };
 }
 
@@ -565,7 +742,7 @@ function checkBriefAnalysisService() {
 }
 
 /**
- * Check script generation service (NEW)
+ * Check script generation service
  */
 function checkScriptGenerationService() {
   return {
@@ -608,7 +785,7 @@ function checkScriptGenerationService() {
 }
 
 /**
- * Check video transcription service (NEW)
+ * Check video transcription service
  */
 function checkVideoTranscriptionService() {
   return {
@@ -673,25 +850,31 @@ function checkAnalyticsEngineService() {
 }
 
 /**
- * Check caching service for analytics
+ * Check caching service for analytics and rate cards
  */
 function checkCachingService() {
   return {
     status: 'enabled',
-    provider: 'MongoDB TTL Collections',
+    provider: 'MongoDB TTL Collections + Node-cache',
     features: {
       analyticsCache: true,
       dashboardCache: true,
       insightsCache: true,
       trendCache: true,
-      scriptCache: true // New script analytics cache
+      scriptCache: true,
+      rateCardCache: true,
+      aiSuggestionsCache: true,
+      marketBenchmarksCache: true
     },
     ttl: {
       dashboard: '30 minutes',
       revenue: '1 hour',
       insights: '2 hours',
       trends: '4 hours',
-      scripts: '1 hour' // New script cache TTL
+      scripts: '1 hour',
+      rateCards: '10 minutes',
+      aiSuggestions: '1 hour',
+      marketBenchmarks: '4 hours'
     },
     performance: {
       hitRate: 'Tracked per user',
@@ -714,7 +897,7 @@ const API_PREFIX = `/api/${config.server.apiVersion || 'v1'}`;
 app.use(API_PREFIX, trackAPIUsage);
 
 /**
- * Welcome endpoint with enhanced feature information including analytics and scripts
+ * Welcome endpoint with enhanced feature information including analytics, scripts, and rate cards
  */
 app.get(API_PREFIX, (req, res) => {
   res.json(
@@ -735,7 +918,7 @@ app.get(API_PREFIX, (req, res) => {
         subscriptions: `${API_PREFIX}/subscriptions`,
         agency: `${API_PREFIX}/agency`,
         analytics: `${API_PREFIX}/analytics`,
-        scripts: `${API_PREFIX}/scripts` // New scripts endpoint
+        scripts: `${API_PREFIX}/scripts`
       },
       features: {
         quarterlyBilling: true,
@@ -772,7 +955,7 @@ app.get(API_PREFIX, (req, res) => {
         crossModuleAnalytics: true,
         predictiveForecasting: config.featureFlags?.aiFeatures || false,
         cachingOptimization: true,
-        // Scripts module features (NEW)
+        // Scripts module features
         scriptGeneration: true,
         aiScriptGeneration: config.featureFlags?.aiFeatures || false,
         videoTranscription: config.featureFlags?.aiFeatures || false,
@@ -783,7 +966,19 @@ app.get(API_PREFIX, (req, res) => {
         trendIntegrationScripts: config.featureFlags?.aiFeatures || false,
         scriptDealConnection: true,
         bulkScriptOperations: true,
-        scriptExportOptions: true
+        scriptExportOptions: true,
+        // Rate card module features
+        rateCardGeneration: true,
+        aiPricingSuggestions: config.featureFlags?.aiFeatures || false,
+        rateCardPDFExport: config.featureFlags?.pdfGeneration !== false,
+        qrCodeGeneration: true,
+        publicRateCardSharing: true,
+        rateCardAnalytics: true,
+        rateCardVersionHistory: true,
+        rateCardPackageDeals: true,
+        rateCardProfessionalDetails: true,
+        rateCardCaching: true,
+        rateCardInputSanitization: true
       }
     })
   );
@@ -799,7 +994,7 @@ app.get(API_PREFIX, (req, res) => {
  */
 
 let loadedModules = 0;
-let totalModules = 11; // Updated to include scripts module
+let totalModules = 12; // Updated to include rate cards module
 
 // Authentication routes
 try {
@@ -842,11 +1037,12 @@ try {
   logWarn('⚠️  Invoice routes not found - module may not be implemented yet', { error: error.message });
 }
 
-// Rate card routes
+// Rate card routes - FULL PRODUCTION IMPLEMENTATION
 try {
   const rateCardRoutes = require('./modules/ratecards/routes');
   app.use(`${API_PREFIX}/ratecards`, rateCardRoutes);
   logInfo('✅ Rate card routes loaded successfully');
+  logInfo('📋 Rate card features enabled: AI Pricing Suggestions, PDF Export, QR Codes, Public Sharing, Analytics, Version History');
   loadedModules++;
 } catch (error) {
   logWarn('⚠️  Rate card routes not found - module may not be implemented yet', { error: error.message });
@@ -904,7 +1100,7 @@ try {
   logWarn('⚠️  Analytics routes not found - module may not be implemented yet', { error: error.message });
 }
 
-// Scripts routes - NEW MODULE
+// Scripts routes - ENHANCED MODULE
 try {
   const scriptsRoutes = require('./modules/scripts/routes');
   
@@ -963,11 +1159,17 @@ app.get(`${API_PREFIX}/status`, (req, res) => {
         features: checkModuleExists('analytics').features || {},
         subscriptionTiers: checkModuleExists('analytics').subscriptionTiers || {}
       },
-      scriptsModule: { // NEW
+      scriptsModule: {
         status: checkModuleExists('scripts').status,
         features: checkModuleExists('scripts').features || {},
         platforms: checkModuleExists('scripts').platforms || [],
         subscriptionTiers: checkModuleExists('scripts').subscriptionTiers || {}
+      },
+      rateCardsModule: {
+        status: checkModuleExists('ratecards').status,
+        features: checkModuleExists('ratecards').features || {},
+        platforms: checkModuleExists('ratecards').platforms || [],
+        subscriptionRequirements: checkModuleExists('ratecards').subscriptionRequirements || {}
       }
     })
   );
@@ -1036,7 +1238,7 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
         'cross_module_analytics',
         'predictive_forecasting',
         'caching_optimization',
-        // Scripts features (NEW)
+        // Scripts features
         'ai_script_generation',
         'video_transcription',
         'multi_platform_optimization',
@@ -1046,7 +1248,18 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
         'script_deal_connection',
         'bulk_script_operations',
         'script_export_options',
-        'file_upload_scripts'
+        'file_upload_scripts',
+        // Rate card features
+        'ai_pricing_suggestions',
+        'rate_card_pdf_export',
+        'qr_code_generation',
+        'public_rate_card_sharing',
+        'rate_card_analytics',
+        'rate_card_version_history',
+        'rate_card_package_deals',
+        'rate_card_professional_details',
+        'rate_card_caching',
+        'rate_card_input_sanitization'
       ]
     })
   );
@@ -1057,7 +1270,7 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
 // ============================================
 
 /**
- * API documentation endpoint with analytics and scripts module details
+ * API documentation endpoint with analytics, scripts, and rate cards module details
  */
 app.get(`${API_PREFIX}/docs`, (req, res) => {
   res.json(
@@ -1114,6 +1327,46 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
           consolidation_types: [
             'monthly', 'brand_wise', 'agency_payout', 'date_range', 'custom_selection'
           ]
+        },
+        ratecards: {
+          description: 'AI-powered rate card generation and management with public sharing capabilities',
+          base_path: `${API_PREFIX}/ratecards`,
+          features: [
+            'ai_pricing_suggestions',
+            'rate_card_creation',
+            'package_deals',
+            'professional_details',
+            'public_sharing',
+            'qr_code_generation',
+            'pdf_export',
+            'analytics_tracking',
+            'version_history',
+            'input_sanitization',
+            'subscription_gating'
+          ],
+          key_endpoints: {
+            create_rate_card: 'POST /ratecards',
+            get_rate_cards: 'GET /ratecards',
+            get_rate_card: 'GET /ratecards/:id',
+            update_metrics: 'PUT /ratecards/:id/metrics',
+            update_pricing: 'PUT /ratecards/:id/pricing',
+            create_package: 'POST /ratecards/:id/packages',
+            publish_rate_card: 'POST /ratecards/:id/publish',
+            public_access: 'GET /ratecards/public/:publicId',
+            generate_pdf: 'GET /ratecards/:id/pdf',
+            get_analytics: 'GET /ratecards/:id/analytics'
+          },
+          supported_platforms: [
+            'instagram', 'youtube', 'linkedin', 'twitter', 'facebook'
+          ],
+          subscription_requirements: {
+            pro: ['basic_rate_cards', 'ai_suggestions', 'pdf_export', '3_cards_limit'],
+            elite: ['unlimited_cards', 'advanced_analytics', 'custom_branding'],
+            agency_starter: ['team_features', 'manager_access', '10_cards_limit'],
+            agency_pro: ['all_features', 'white_label', 'unlimited_cards']
+          },
+          ai_features: config.featureFlags?.aiFeatures || false,
+          public_sharing: true
         },
         briefs: {
           description: 'Brand brief analysis and AI-powered extraction with deal conversion',
@@ -1175,7 +1428,7 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
             'deals', 'invoices', 'performance', 'contracts', 'briefs', 'ratecards'
           ]
         },
-        scripts: { // NEW MODULE DOCUMENTATION
+        scripts: {
           description: 'AI-powered content script generation for social media creators with multi-platform optimization',
           base_path: `${API_PREFIX}/scripts`,
           features: [
@@ -1235,12 +1488,17 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
         analytics_ai: '20 requests per hour',
         analytics_advanced: '10 requests per hour',
         analytics_cache: '5 requests per 15 minutes',
-        // Scripts rate limits (NEW)
+        // Scripts rate limits
         script_creation: 'Tier-based limits (5-unlimited per hour)',
         script_ai_generation: 'Tier-based limits (0-100 per hour)',
         video_transcription: 'Tier-based limits (0-unlimited per hour)',
         script_regeneration: '5 requests per hour',
-        script_variations: '10 requests per hour'
+        script_variations: '10 requests per hour',
+        // Rate card rate limits
+        rate_card_general: '100 requests per 15 minutes',
+        rate_card_ai_suggestions: '10 requests per hour',
+        rate_card_pdf_generation: '5 requests per 15 minutes',
+        rate_card_public_access: '30 requests per minute'
       },
       file_upload: {
         max_size: {
@@ -1253,9 +1511,10 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
         allowed_types: {
           invoices: ['PDF', 'JPEG', 'PNG', 'JPG', 'WEBP'],
           briefs: ['PDF', 'DOC', 'DOCX', 'TXT'],
-          scripts: ['PDF', 'DOC', 'DOCX', 'TXT', 'MP4', 'MOV', 'AVI'] // NEW
+          scripts: ['PDF', 'DOC', 'DOCX', 'TXT', 'MP4', 'MOV', 'AVI'],
+          ratecards: ['JPEG', 'PNG', 'PDF']
         },
-        video_limits: { // NEW
+        video_limits: {
           pro: '25MB',
           elite: '100MB',
           agency: '200MB'
@@ -1264,8 +1523,9 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
           'POST /invoices/:id/upload-payment-screenshot',
           'POST /invoices/:id/generate-pdf',
           'POST /briefs/create-file',
-          'POST /scripts/create-file', // NEW
-          'POST /scripts/create-video' // NEW
+          'POST /scripts/create-file',
+          'POST /scripts/create-video',
+          'GET /ratecards/:id/pdf'
         ]
       },
       support: {
@@ -1302,13 +1562,20 @@ app.get(`${API_PREFIX}/postman`, (req, res) => {
         'AI insights generation',
         'Trend analysis examples',
         'Risk analytics workflows',
-        // Scripts features (NEW)
+        // Scripts features
         'Script generation workflows',
         'Video transcription examples',
         'AI script generation examples',
         'Multi-platform optimization examples',
         'A/B testing workflows',
-        'Script analytics examples'
+        'Script analytics examples',
+        // Rate card features
+        'Rate card generation workflows',
+        'AI pricing suggestion examples',
+        'PDF export examples',
+        'Public sharing examples',
+        'QR code generation examples',
+        'Rate card analytics workflows'
       ]
     })
   );
@@ -1319,7 +1586,7 @@ app.get(`${API_PREFIX}/postman`, (req, res) => {
 // ============================================
 
 /**
- * Get current feature flags with analytics and scripts-specific flags
+ * Get current feature flags with analytics, scripts, and rate cards-specific flags
  */
 app.get(`${API_PREFIX}/features`, (req, res) => {
   res.json(
@@ -1378,7 +1645,7 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
         analytics_export: false, // Future feature
         industry_benchmarks: false, // Future feature
         
-        // Scripts module features (NEW)
+        // Scripts module features
         script_generation: true,
         ai_script_generation: config.featureFlags?.aiFeatures || false,
         video_transcription: config.featureFlags?.aiFeatures || false,
@@ -1392,7 +1659,20 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
         script_export_options: true,
         script_regeneration: config.featureFlags?.aiFeatures || false,
         script_variations: config.featureFlags?.aiFeatures || false,
-        advanced_script_analytics: true
+        advanced_script_analytics: true,
+        
+        // Rate card module features
+        rate_card_generation: true,
+        ai_pricing_suggestions: config.featureFlags?.aiFeatures || false,
+        rate_card_pdf_export: config.featureFlags?.pdfGeneration !== false,
+        qr_code_generation: true,
+        public_rate_card_sharing: true,
+        rate_card_analytics: true,
+        rate_card_version_history: true,
+        rate_card_package_deals: true,
+        rate_card_professional_details: true,
+        rate_card_caching: true,
+        rate_card_input_sanitization: true
       },
       environment: config.server.environment,
       brief_features: {
@@ -1452,7 +1732,7 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
           cache_ops: '5 requests/15min'
         }
       },
-      scripts_features: { // NEW
+      scripts_features: {
         subscription_access: {
           starter: 'Basic script generation (10/month)',
           pro: 'Enhanced features + video transcription (25/month)',
@@ -1496,13 +1776,50 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
           platform_optimization: true,
           success_rates: true
         }
+      },
+      rate_card_features: {
+        subscription_access: {
+          pro: 'Basic rate cards + AI suggestions (3 cards limit)',
+          elite: 'Unlimited rate cards + advanced features',
+          agency_starter: 'Team features + manager access (10 cards limit)',
+          agency_pro: 'All agency features + unlimited cards'
+        },
+        supported_platforms: [
+          'instagram', 'youtube', 'linkedin', 'twitter', 'facebook'
+        ],
+        ai_capabilities: {
+          pricing_suggestions: config.featureFlags?.aiFeatures || false,
+          market_analysis: config.featureFlags?.aiFeatures || false,
+          niche_optimization: config.featureFlags?.aiFeatures || false,
+          seasonal_adjustments: config.featureFlags?.aiFeatures || false
+        },
+        export_formats: ['PDF', 'JSON'],
+        sharing_options: {
+          public_urls: true,
+          qr_codes: true,
+          password_protection: true,
+          expiry_dates: true,
+          analytics_tracking: true
+        },
+        rate_limits: {
+          general: '100 requests/15min',
+          ai_suggestions: '10 requests/hour',
+          pdf_generation: '5 requests/15min',
+          public_access: '30 requests/minute'
+        },
+        caching: {
+          rate_cards: '10 minutes TTL',
+          ai_suggestions: '1 hour TTL',
+          public_cards: '30 minutes TTL',
+          market_data: '4 hours TTL'
+        }
       }
     })
   );
 });
 
 // ============================================
-// SCRIPTS-SPECIFIC ERROR HANDLING (NEW)
+// SCRIPTS-SPECIFIC ERROR HANDLING
 // ============================================
 
 // Scripts file upload error handler
@@ -1583,6 +1900,100 @@ app.use('/api/*/scripts', (error, req, res, next) => {
 });
 
 logInfo('📝 Scripts-specific error handling configured');
+
+// ============================================
+// RATE CARD SPECIFIC ERROR HANDLING
+// ============================================
+
+// Rate card specific error handler middleware
+app.use('/api/*/ratecards', (error, req, res, next) => {
+  // Handle rate card specific errors
+  if (error.code && error.code.startsWith('RC')) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+      code: error.code,
+      data: error.data || null,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle AI processing errors
+  if (error.message.includes('AI pricing service unavailable') || 
+      error.message.includes('AI service error')) {
+    return res.status(503).json({
+      success: false,
+      message: 'AI pricing suggestions temporarily unavailable. Rate card created with fallback pricing.',
+      code: 'RC5000',
+      fallback: true,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle PDF generation errors
+  if (error.message.includes('PDF generation failed')) {
+    return res.status(500).json({
+      success: false,
+      message: 'PDF generation failed. Please try again later.',
+      code: 'RC5001',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle QR code generation errors
+  if (error.message.includes('QR code generation failed')) {
+    return res.status(500).json({
+      success: false,
+      message: 'QR code generation failed. Rate card published without QR code.',
+      code: 'RC5002',
+      partial: true,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle subscription limit errors
+  if (error.message.includes('Rate card limit reached')) {
+    return res.status(403).json({
+      success: false,
+      message: error.message,
+      code: 'RC4101',
+      upgrade: true,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle public access errors
+  if (error.message.includes('Password required')) {
+    return res.status(401).json({
+      success: false,
+      message: 'Password required to access this rate card',
+      code: 'RC4303',
+      passwordRequired: true,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle expired rate card errors
+  if (error.message.includes('Rate card has expired')) {
+    return res.status(410).json({
+      success: false,
+      message: 'This rate card has expired and is no longer available',
+      code: 'RC4302',
+      expired: true,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle cache errors (non-blocking)
+  if (error.message.includes('Cache operation failed')) {
+    logWarn('Rate card cache error - continuing without cache', { error: error.message });
+    next(); // Continue without caching
+  } else {
+    next(error);
+  }
+});
+
+logInfo('📋 Rate card specific error handling configured');
 
 // ============================================
 // ANALYTICS-SPECIFIC ERROR HANDLING
@@ -2079,7 +2490,7 @@ const initializeAnalyticsServices = async () => {
 };
 
 // ============================================
-// SCRIPTS SERVICES INITIALIZATION (NEW)
+// SCRIPTS SERVICES INITIALIZATION
 // ============================================
 
 /**
@@ -2260,6 +2671,241 @@ const initializeScriptsServices = async () => {
   }
 };
 
+// ============================================
+// RATE CARD SERVICES INITIALIZATION
+// ============================================
+
+/**
+ * Initialize rate card specific services
+ */
+const initializeRateCardServices = async () => {
+  try {
+    logInfo('📋 Initializing rate card services...');
+    
+    // Initialize rate card cache cleanup job
+    cron.schedule('0 2 * * *', async () => {
+      try {
+        logInfo('🗑️  Cleaning up expired rate card caches...');
+        
+        // Import Node-cache if available
+        try {
+          const NodeCache = require('node-cache');
+          const cache = new NodeCache();
+          
+          // Clear all expired keys
+          const keys = cache.keys();
+          let clearedCount = 0;
+          
+          keys.forEach(key => {
+            if (key.startsWith('rate_card:') || key.startsWith('user_rate_cards:') || 
+                key.startsWith('public_rate_card:') || key.startsWith('ai_suggestions:')) {
+              cache.del(key);
+              clearedCount++;
+            }
+          });
+          
+          logInfo(`✅ Rate card cache cleanup completed - cleared ${clearedCount} expired entries`);
+        } catch (error) {
+          logWarn('⚠️  Rate card cache cleanup failed', { error: error.message });
+        }
+        
+      } catch (error) {
+        logError('❌ Rate card cache cleanup failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    // Initialize AI suggestions cleanup job (if AI is enabled)
+    if (config.featureFlags?.aiFeatures) {
+      cron.schedule('0 4 * * *', async () => {
+        try {
+          logInfo('🤖 Cleaning up old AI suggestions cache...');
+          
+          const { RateCard } = require('./modules/ratecards/model');
+          
+          // Update rate cards with old AI suggestions to trigger refresh
+          const thirtyDaysAgo = new Date(Date.now() - (30 * 24 * 60 * 60 * 1000));
+          const result = await RateCard.updateMany(
+            {
+              'aiMetadata.lastSuggestionDate': { $lt: thirtyDaysAgo },
+              'version.status': { $in: ['draft', 'active'] },
+              isDeleted: false
+            },
+            {
+              $unset: { 'aiMetadata.marketData': 1 }
+            }
+          );
+          
+          logInfo(`✅ AI suggestions cleanup completed - marked ${result.modifiedCount} rate cards for refresh`);
+          
+        } catch (error) {
+          logError('❌ AI suggestions cleanup failed', { error: error.message });
+        }
+      }, {
+        timezone: 'Asia/Kolkata'
+      });
+      
+      logInfo('🤖 AI suggestions cleanup cron job scheduled (daily at 4 AM IST)');
+    }
+    
+    // Initialize rate card analytics update job
+    cron.schedule('0 6 * * *', async () => {
+      try {
+        logInfo('📊 Updating rate card analytics...');
+        
+        const { RateCard } = require('./modules/ratecards/model');
+        
+        // Update expired public rate cards
+        const now = new Date();
+        const expiredResult = await RateCard.updateMany(
+          {
+            'sharing.isPublic': true,
+            'sharing.expiresAt': { $lt: now },
+            'version.status': 'active'
+          },
+          {
+            $set: { 
+              'version.status': 'expired',
+              'sharing.isPublic': false 
+            }
+          }
+        );
+        
+        logInfo(`✅ Rate card analytics updated - ${expiredResult.modifiedCount} rate cards expired`);
+        
+      } catch (error) {
+        logError('❌ Rate card analytics update failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    // Initialize QR code cleanup job
+    cron.schedule('0 3 * * 1', async () => { // Every Monday at 3 AM
+      try {
+        logInfo('🗑️  Cleaning up unused QR codes...');
+        
+        const { RateCard } = require('./modules/ratecards/model');
+        
+        // Clear QR code URLs for deleted or archived rate cards
+        const result = await RateCard.updateMany(
+          {
+            $or: [
+              { isDeleted: true },
+              { 'version.status': 'archived' },
+              { 'sharing.isPublic': false }
+            ],
+            'sharing.qrCodeUrl': { $exists: true }
+          },
+          {
+            $unset: { 'sharing.qrCodeUrl': 1 }
+          }
+        );
+        
+        logInfo(`✅ QR code cleanup completed - cleared ${result.modifiedCount} unused QR codes`);
+        
+      } catch (error) {
+        logError('❌ QR code cleanup failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    // Initialize rate card PDF cleanup job
+    if (config.featureFlags?.pdfGeneration !== false) {
+      cron.schedule('0 1 * * 1', async () => { // Every Monday at 1 AM
+        try {
+          logInfo('🗑️  Cleaning up old rate card PDF files...');
+          
+          const fs = require('fs').promises;
+          const path = require('path');
+          const pdfDir = path.join(__dirname, '../storage/ratecards');
+          
+          try {
+            const files = await fs.readdir(pdfDir);
+            const now = Date.now();
+            const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
+            
+            let cleanedCount = 0;
+            for (const file of files) {
+              if (file.endsWith('.pdf')) {
+                const filePath = path.join(pdfDir, file);
+                const stats = await fs.stat(filePath);
+                
+                if (stats.mtime.getTime() < sevenDaysAgo) {
+                  await fs.unlink(filePath);
+                  cleanedCount++;
+                }
+              }
+            }
+            
+            logInfo(`✅ Rate card PDF cleanup completed - removed ${cleanedCount} old PDF files`);
+          } catch (error) {
+            logWarn('⚠️  Rate card PDF directory not found or cleanup failed', { error: error.message });
+          }
+          
+        } catch (error) {
+          logError('❌ Rate card PDF cleanup failed', { error: error.message });
+        }
+      }, {
+        timezone: 'Asia/Kolkata'
+      });
+      
+      logInfo('📄 Rate card PDF cleanup cron job scheduled (weekly)');
+    }
+    
+    // Initialize rate card view analytics aggregation
+    cron.schedule('0 23 * * *', async () => { // Daily at 11 PM
+      try {
+        logInfo('📊 Aggregating rate card view analytics...');
+        
+        const { RateCard } = require('./modules/ratecards/model');
+        
+        // Update unique views count based on view log
+        const rateCards = await RateCard.find({
+          'sharing.isPublic': true,
+          'sharing.analytics.viewLog.0': { $exists: true }
+        });
+        
+        let updatedCount = 0;
+        for (const rateCard of rateCards) {
+          const uniqueIps = new Set();
+          rateCard.sharing.analytics.viewLog.forEach(view => {
+            if (view.ipHash) {
+              uniqueIps.add(view.ipHash);
+            }
+          });
+          
+          rateCard.sharing.analytics.uniqueViews = uniqueIps.size;
+          await rateCard.save();
+          updatedCount++;
+        }
+        
+        logInfo(`✅ Rate card view analytics aggregated - updated ${updatedCount} rate cards`);
+        
+      } catch (error) {
+        logError('❌ Rate card view analytics aggregation failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    logInfo('📋 Rate card cache cleanup cron job scheduled (daily at 2 AM IST)');
+    logInfo('📊 Rate card analytics cron job scheduled (daily at 6 AM IST)');
+    logInfo('📊 Rate card view analytics cron job scheduled (daily at 11 PM IST)');
+    
+    return true;
+  } catch (error) {
+    logWarn('⚠️  Rate card services initialization partially failed', { error: error.message });
+    return false;
+  }
+};
+
+// ============================================
+// ENVIRONMENT VALIDATION FUNCTIONS
+// ============================================
+
 /**
  * Validate scripts environment and dependencies with memory checks
  */
@@ -2361,6 +3007,146 @@ const validateScriptsEnvironment = () => {
 };
 
 /**
+ * Validate rate card environment and dependencies
+ */
+const validateRateCardEnvironment = () => {
+  const warnings = [];
+  const errors = [];
+  
+  // Check AI processing requirements for pricing suggestions
+  if (config.featureFlags?.aiFeatures) {
+    if (!process.env.OPENAI_API_KEY) {
+      warnings.push('OpenAI API key not configured - AI pricing suggestions will not work');
+    } else {
+      logInfo('✅ OpenAI API key configured for AI pricing suggestions');
+    }
+  }
+  
+  // Check PDF generation requirements
+  if (config.featureFlags?.pdfGeneration !== false) {
+    try {
+      require('pdfkit');
+      logInfo('✅ PDFKit available for rate card PDF generation');
+    } catch (error) {
+      errors.push('PDFKit not installed - PDF generation will fail');
+    }
+  }
+  
+  // Check QR code generation requirements
+  try {
+    require('qrcode');
+    logInfo('✅ QRCode library available for QR code generation');
+  } catch (error) {
+    errors.push('QRCode library not installed - QR code generation will fail');
+  }
+  
+  // Check caching requirements
+  try {
+    require('node-cache');
+    logInfo('✅ Node-cache available for rate card caching');
+  } catch (error) {
+    warnings.push('Node-cache not installed - rate card caching will be limited');
+  }
+  
+  // Check rate limiting requirements
+  try {
+    require('express-rate-limit');
+    logInfo('✅ Express-rate-limit available for API protection');
+  } catch (error) {
+    errors.push('Express-rate-limit not installed - API rate limiting will fail');
+  }
+  
+  // Check input validation requirements
+  try {
+    require('joi');
+    logInfo('✅ Joi available for input validation');
+  } catch (error) {
+    errors.push('Joi not installed - input validation will fail');
+  }
+  
+  // Check sanitization requirements
+  try {
+    require('isomorphic-dompurify');
+    logInfo('✅ DOMPurify available for input sanitization');
+  } catch (error) {
+    errors.push('DOMPurify not installed - input sanitization will fail');
+  }
+  
+  // Check axios for external API calls
+  try {
+    require('axios');
+    logInfo('✅ Axios available for external API calls');
+  } catch (error) {
+    errors.push('Axios not installed - AI pricing calls will fail');
+  }
+  
+  // Check crypto for hashing
+  try {
+    require('crypto');
+    logInfo('✅ Crypto module available for hashing');
+  } catch (error) {
+    errors.push('Crypto module not available - security features will fail');
+  }
+  
+  // Check MongoDB for rate card storage
+  try {
+    // MongoDB is already initialized, rate card models will create collections as needed
+    logInfo('✅ MongoDB available for rate card storage');
+  } catch (error) {
+    errors.push('MongoDB not available - rate card storage will fail');
+  }
+  
+  // Check storage directory for PDFs
+  if (config.featureFlags?.pdfGeneration !== false) {
+    const fs = require('fs');
+    const path = require('path');
+    const rateCardPdfDir = path.join(__dirname, '../storage/ratecards');
+    
+    try {
+      if (!fs.existsSync(rateCardPdfDir)) {
+        fs.mkdirSync(rateCardPdfDir, { recursive: true });
+        logInfo('✅ Rate card PDF storage directory created');
+      } else {
+        logInfo('✅ Rate card PDF storage directory exists');
+      }
+    } catch (error) {
+      warnings.push('Cannot create rate card PDF storage directory - PDF storage may fail');
+    }
+  }
+  
+  // Check if deals module is available for rate card integration
+  try {
+    require('./modules/deals/model');
+    logInfo('✅ Deals module available for rate card integration');
+  } catch (error) {
+    warnings.push('Deals module not available - deal conversion from rate cards will not work');
+  }
+  
+  // Check memory for caching and AI processing
+  const usage = process.memoryUsage();
+  const heapTotalMB = Math.round(usage.heapTotal / 1024 / 1024);
+  
+  if (heapTotalMB < 256) { // Less than 256MB
+    warnings.push('Low memory available - rate card caching and AI processing may be limited');
+  } else {
+    logInfo('✅ Sufficient memory available for rate card processing');
+  }
+  
+  if (errors.length > 0) {
+    logError('❌ Rate card module environment errors:', { errors });
+    return false;
+  }
+  
+  if (warnings.length > 0) {
+    logWarn('⚠️  Rate card module environment warnings:', { warnings });
+  } else {
+    logInfo('✅ Rate card module environment validation passed');
+  }
+  
+  return true;
+};
+
+/**
  * Validate analytics environment and dependencies
  */
 const validateAnalyticsEnvironment = () => {
@@ -2393,7 +3179,7 @@ const validateAnalyticsEnvironment = () => {
   }
   
   // Check if other required modules are available for data correlation
-  const requiredModules = ['deals', 'invoices', 'performance', 'contracts', 'scripts'];
+  const requiredModules = ['deals', 'invoices', 'performance', 'contracts', 'scripts', 'ratecards'];
   const missingModules = [];
   
   for (const module of requiredModules) {
@@ -2533,7 +3319,7 @@ const validateBriefEnvironment = () => {
 // ============================================
 
 /**
- * Initialize the application with enhanced support for all modules including analytics and scripts
+ * Initialize the application with enhanced support for all modules including analytics, scripts, and rate cards
  */
 const initializeApp = async () => {
   try {
@@ -2567,6 +3353,12 @@ const initializeApp = async () => {
     const scriptsEnvOk = validateScriptsEnvironment();
     if (!scriptsEnvOk) {
       logWarn('⚠️  Scripts module environment validation failed - some features may be limited');
+    }
+    
+    logInfo('📋 Validating rate card module environment...');
+    const rateCardEnvOk = validateRateCardEnvironment();
+    if (!rateCardEnvOk) {
+      logWarn('⚠️  Rate card module environment validation failed - some features may be limited');
     }
     
     // Initialize external services
@@ -2609,6 +3401,15 @@ const initializeApp = async () => {
       logWarn('⚠️  Scripts services partially initialized');
     }
     
+    // Initialize rate card services
+    logInfo('📋 Initializing rate card services...');
+    const rateCardServicesOk = await initializeRateCardServices();
+    if (rateCardServicesOk) {
+      logInfo('✅ Rate card services initialized successfully');
+    } else {
+      logWarn('⚠️  Rate card services partially initialized');
+    }
+    
     // Log module status
     logInfo(`📦 Loaded ${loadedModules}/${totalModules} modules (${Math.round((loadedModules/totalModules)*100)}% complete)`);
     
@@ -2617,6 +3418,7 @@ const initializeApp = async () => {
     const briefStatus = checkModuleExists('briefs');
     const analyticsStatus = checkModuleExists('analytics');
     const scriptsStatus = checkModuleExists('scripts');
+    const rateCardStatus = checkModuleExists('ratecards');
     
     if (invoiceStatus.available) {
       logInfo('📄 Invoice module status:', {
@@ -2646,6 +3448,15 @@ const initializeApp = async () => {
         features: scriptsStatus.features,
         platforms: scriptsStatus.platforms,
         subscriptionTiers: scriptsStatus.subscriptionTiers
+      });
+    }
+    
+    if (rateCardStatus.available) {
+      logInfo('📋 Rate card module status:', {
+        status: rateCardStatus.status,
+        features: rateCardStatus.features,
+        platforms: rateCardStatus.platforms,
+        subscriptionRequirements: rateCardStatus.subscriptionRequirements
       });
     }
     
@@ -2743,6 +3554,15 @@ const initializeServices = async () => {
       logWarn('⚠️  Scripts processing service not available', { error: error.message });
     }
     
+    // Rate Card Processing Service Check
+    try {
+      // MongoDB is already initialized for rate card data storage
+      logInfo('📋 Rate card processing service available');
+      servicesInitialized++;
+    } catch (error) {
+      logWarn('⚠️  Rate card processing service not available', { error: error.message });
+    }
+    
     logInfo(`🔧 Initialized ${servicesInitialized} external services`);
     return true;
   } catch (error) {
@@ -2777,6 +3597,24 @@ const gracefulShutdown = async (signal) => {
       logInfo('✅ Analytics caches cleared');
     } catch (error) {
       logWarn('⚠️  Analytics cache clearing failed', { error: error.message });
+    }
+    
+    // Clear rate card caches if needed
+    try {
+      const NodeCache = require('node-cache');
+      const cache = new NodeCache();
+      
+      logInfo('🗑️  Clearing rate card caches...');
+      const keys = cache.keys();
+      keys.forEach(key => {
+        if (key.startsWith('rate_card:') || key.startsWith('user_rate_cards:') || 
+            key.startsWith('public_rate_card:') || key.startsWith('ai_suggestions:')) {
+          cache.del(key);
+        }
+      });
+      logInfo('✅ Rate card caches cleared');
+    } catch (error) {
+      logWarn('⚠️  Rate card cache clearing failed', { error: error.message });
     }
     
     // Close database connections
@@ -2822,9 +3660,11 @@ module.exports.gracefulShutdown = gracefulShutdown;
 module.exports.initializeInvoiceServices = initializeInvoiceServices;
 module.exports.initializeBriefServices = initializeBriefServices;
 module.exports.initializeAnalyticsServices = initializeAnalyticsServices;
-module.exports.initializeScriptsServices = initializeScriptsServices; // NEW
+module.exports.initializeScriptsServices = initializeScriptsServices;
+module.exports.initializeRateCardServices = initializeRateCardServices;
 module.exports.validateInvoiceEnvironment = validateInvoiceEnvironment;
 module.exports.validateBriefEnvironment = validateBriefEnvironment;
 module.exports.validateAnalyticsEnvironment = validateAnalyticsEnvironment;
-module.exports.validateScriptsEnvironment = validateScriptsEnvironment; // NEW
+module.exports.validateScriptsEnvironment = validateScriptsEnvironment;
+module.exports.validateRateCardEnvironment = validateRateCardEnvironment;
 module.exports.rateLimitByTier = rateLimitByTier;

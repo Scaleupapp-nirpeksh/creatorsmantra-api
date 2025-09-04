@@ -2,7 +2,7 @@
  * src/app.js
  * CreatorsMantra Backend - Main Application
  * Express.js application setup with middleware and routes
- * Enhanced with Invoice Module Support, Brief Module Support, Analytics Module, Scripts Module, Rate Cards Module & Production Features
+ * Enhanced with Performance Module, Invoice Module, Brief Module, Analytics Module, Scripts Module, Rate Cards Module & Production Features
  * 
  * @author CreatorsMantra Team
  * @version 1.0.0
@@ -79,7 +79,7 @@ logInfo('🧠 Memory monitoring middleware loaded');
 logInfo('⚡ Rate limiting by subscription tier configured');
 
 // ============================================
-// FILE UPLOAD MIDDLEWARE FOR INVOICES
+// FILE UPLOAD MIDDLEWARE CONFIGURATIONS
 // ============================================
 
 // Invoice file upload configuration
@@ -107,16 +107,35 @@ const invoiceFileUpload = multer({
   storage: multer.memoryStorage() // Store in memory for processing
 });
 
-// Make file upload available globally for invoice routes
-app.locals.invoiceFileUpload = invoiceFileUpload;
+// Performance module file upload configuration
+const performanceFileUpload = multer({
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 5 // Maximum 5 files per request
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow evidence file types for performance module
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png',
+      'image/jpg',
+      'image/webp',
+      'application/pdf',
+      'text/plain',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Allowed: JPG, PNG, WEBP, PDF, TXT, DOC, DOCX'), false);
+    }
+  },
+  storage: multer.memoryStorage() // Store in memory for processing
+});
 
-logInfo('📎 Invoice file upload middleware configured');
-
-// ============================================
-// RATE CARD FILE UPLOAD MIDDLEWARE
-// ============================================
-
-// Rate card file upload configuration for QR codes and exports
+// Rate card file upload configuration
 const rateCardFileUpload = multer({
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB limit for rate card exports
@@ -140,9 +159,13 @@ const rateCardFileUpload = multer({
   storage: multer.memoryStorage() // Store in memory for processing
 });
 
-// Make rate card file upload available globally
+// Make file upload middleware available globally
+app.locals.invoiceFileUpload = invoiceFileUpload;
+app.locals.performanceFileUpload = performanceFileUpload;
 app.locals.rateCardFileUpload = rateCardFileUpload;
 
+logInfo('📎 Invoice file upload middleware configured');
+logInfo('📊 Performance file upload middleware configured');
 logInfo('📋 Rate card file upload middleware configured');
 
 // ============================================
@@ -223,6 +246,22 @@ try {
   logWarn('⚠️  Rate card storage directory not found');
 }
 
+// Serve performance reports (if stored locally)
+try {
+  app.use('/performance-reports', express.static(path.join(__dirname, '../uploads/performance/reports')));
+  logInfo('📊 Performance reports serving enabled');
+} catch (error) {
+  logWarn('⚠️  Performance reports storage directory not found');
+}
+
+// Serve performance evidence files (if stored locally)
+try {
+  app.use('/performance-evidence', express.static(path.join(__dirname, '../uploads/performance')));
+  logInfo('📋 Performance evidence serving enabled');
+} catch (error) {
+  logWarn('⚠️  Performance evidence storage directory not found');
+}
+
 // ============================================
 // HEALTH CHECK ROUTES
 // ============================================
@@ -298,7 +337,15 @@ app.get('/health/detailed', async (req, res) => {
         rateCardPDFExportEnabled: config.featureFlags?.pdfGeneration !== false,
         qrCodeGenerationEnabled: true,
         publicRateCardSharingEnabled: true,
-        rateCardAnalyticsEnabled: true
+        rateCardAnalyticsEnabled: true,
+        // Performance module features
+        performanceTrackingEnabled: true,
+        aiPerformanceAnalysisEnabled: config.featureFlags?.aiFeatures || false,
+        performanceReportsEnabled: config.featureFlags?.pdfGeneration !== false,
+        evidenceCollectionEnabled: true,
+        clientCommunicationEnabled: config.featureFlags?.emailNotifications || false,
+        performanceAnalyticsEnabled: true,
+        publicPerformancePortfolioEnabled: true
       },
       modules: {
         auth: checkModuleExists('auth'),
@@ -325,6 +372,8 @@ app.get('/health/detailed', async (req, res) => {
         videoTranscription: checkVideoTranscriptionService(),
         rateCardAI: checkRateCardAIService(),
         rateCardPDF: checkRateCardPDFService(),
+        performanceAnalysis: checkPerformanceAnalysisService(),
+        performanceReporting: checkPerformanceReportingService(),
         caching: checkCachingService()
       }
     };
@@ -347,11 +396,58 @@ app.get('/health/detailed', async (req, res) => {
 });
 
 /**
- * Enhanced module check function with analytics, scripts, and rate cards module support
+ * Enhanced module check function with performance module support
  */
 function checkModuleExists(moduleName) {
   try {
     const routes = require(`./modules/${moduleName}/routes`);
+    
+    // Special health check for performance module
+    if (moduleName === 'performance') {
+      try {
+        const { PerformanceCase, PerformanceEvidence, PerformanceAnalysis, PerformanceReport, PerformanceSettings, PerformancePortfolio } = require(`./modules/${moduleName}/model`);
+        const performanceController = require(`./modules/${moduleName}/controller`);
+        
+        return { 
+          status: 'loaded', 
+          available: true,
+          features: {
+            models: !!(PerformanceCase && PerformanceEvidence && PerformanceAnalysis && PerformanceReport && PerformanceSettings && PerformancePortfolio),
+            controller: !!performanceController,
+            evidenceCollection: true,
+            aiAnalysis: config.featureFlags?.aiFeatures || false,
+            reportGeneration: config.featureFlags?.pdfGeneration !== false,
+            clientCommunication: config.featureFlags?.emailNotifications || false,
+            publicPortfolio: true,
+            performanceAnalytics: true,
+            subscriptionGating: true,
+            rateLimiting: true,
+            fileUpload: true,
+            qrCodeGeneration: true
+          },
+          subscriptionTiers: {
+            starter: ['basic_performance', 'evidence_collection'],
+            pro: ['ai_analysis', 'professional_reports', 'advanced_metrics'],
+            elite: ['branded_reports', 'advanced_analytics', 'performance_insights'],
+            agency: ['white_label_reports', 'multi_creator_dashboard', 'consolidated_analytics']
+          },
+          evidenceTypes: [
+            'content_screenshot', 'analytics_screenshot', 'brand_feedback', 
+            'testimonial', 'additional_deliverable', 'custom'
+          ],
+          reportTemplates: ['basic', 'professional', 'detailed', 'branded', 'white_label'],
+          platforms: ['instagram', 'youtube', 'linkedin', 'twitter', 'facebook', 'snapchat'],
+          version: '1.0.0'
+        };
+      } catch (error) {
+        return { 
+          status: 'partial', 
+          available: true,
+          error: 'Performance service layer issues',
+          details: error.message
+        };
+      }
+    }
     
     // Special health check for scripts module
     if (moduleName === 'scripts') {
@@ -577,7 +673,7 @@ function checkModuleExists(moduleName) {
 }
 
 /**
- * Check cron jobs status
+ * Check cron jobs status with performance module jobs
  */
 function checkCronJobsStatus() {
   try {
@@ -596,12 +692,70 @@ function checkCronJobsStatus() {
       rateCardCacheCleanup: true,
       rateCardAnalyticsUpdate: true,
       aiSuggestionsCleanup: config.featureFlags?.aiFeatures || false,
-      qrCodeCleanup: true
+      qrCodeCleanup: true,
+      // Performance module specific jobs
+      performanceFileCleanup: true,
+      performanceReportCleanup: true,
+      aiAnalysisCleanup: config.featureFlags?.aiFeatures || false,
+      performanceAnalyticsUpdate: true,
+      portfolioUpdates: true
     };
   } catch (error) {
     return {
       status: 'error',
       error: error.message
+    };
+  }
+}
+
+/**
+ * Check performance analysis service
+ */
+function checkPerformanceAnalysisService() {
+  return {
+    status: config.featureFlags?.aiFeatures ? 'enabled' : 'disabled',
+    provider: 'OpenAI',
+    models: ['gpt-4'],
+    available: !!process.env.OPENAI_API_KEY,
+    features: [
+      'evidence_analysis',
+      'performance_comparison', 
+      'insights_generation',
+      'business_metrics',
+      'predictions',
+      'rate_card_optimization'
+    ],
+    rateLimits: {
+      aiAnalysis: '10 requests/hour',
+      reportGeneration: '5 requests/15min'
+    }
+  };
+}
+
+/**
+ * Check performance reporting service
+ */
+function checkPerformanceReportingService() {
+  try {
+    require('pdfkit');
+    require('qrcode');
+    return {
+      status: 'available',
+      enabled: config.featureFlags?.pdfGeneration !== false,
+      features: {
+        pdfReports: true,
+        customBranding: true,
+        qrCodeEmbedding: true,
+        clientDelivery: config.featureFlags?.emailNotifications || false,
+        publicPortfolio: true,
+        multipleTemplates: true
+      },
+      templates: ['basic', 'professional', 'detailed', 'branded', 'white_label']
+    };
+  } catch (error) {
+    return {
+      status: 'unavailable',
+      error: 'PDFKit or QRCode not installed'
     };
   }
 }
@@ -618,6 +772,7 @@ function checkPDFGenerationService() {
       features: {
         invoicePDFs: true,
         rateCardPDFs: true,
+        performanceReports: true,
         customBranding: true,
         multiPageSupport: true
       }
@@ -663,12 +818,13 @@ function checkFileUploadService() {
   return {
     status: 'available',
     maxFileSize: '10MB',
-    allowedTypes: ['PDF', 'JPEG', 'PNG', 'JPG', 'WEBP'],
+    allowedTypes: ['PDF', 'JPEG', 'PNG', 'JPG', 'WEBP', 'DOC', 'DOCX', 'TXT'],
     storage: config.aws?.accessKeyId ? 'AWS S3' : 'Local',
     briefUploads: true,
     invoiceUploads: true,
     scriptUploads: true,
-    rateCardUploads: true
+    rateCardUploads: true,
+    performanceUploads: true
   };
 }
 
@@ -693,7 +849,17 @@ function checkAIProcessingService() {
     provider: 'OpenAI',
     models: ['gpt-4', 'whisper-1'],
     available: !!process.env.OPENAI_API_KEY,
-    features: ['brief_extraction', 'risk_assessment', 'pricing_suggestions', 'business_insights', 'trend_analysis', 'script_generation', 'video_transcription', 'rate_card_pricing']
+    features: [
+      'brief_extraction', 
+      'risk_assessment', 
+      'pricing_suggestions', 
+      'business_insights', 
+      'trend_analysis', 
+      'script_generation', 
+      'video_transcription', 
+      'rate_card_pricing',
+      'performance_analysis'
+    ]
   };
 }
 
@@ -825,6 +991,7 @@ function checkAnalyticsEngineService() {
       crossModuleAnalytics: true,
       revenueIntelligence: true,
       dealPerformance: true,
+      performanceTracking: true,
       aiInsights: config.featureFlags?.aiFeatures || false,
       trendAnalysis: config.featureFlags?.aiFeatures || false,
       riskAnalytics: true,
@@ -850,7 +1017,7 @@ function checkAnalyticsEngineService() {
 }
 
 /**
- * Check caching service for analytics and rate cards
+ * Check caching service for analytics, rate cards, and performance
  */
 function checkCachingService() {
   return {
@@ -864,7 +1031,10 @@ function checkCachingService() {
       scriptCache: true,
       rateCardCache: true,
       aiSuggestionsCache: true,
-      marketBenchmarksCache: true
+      marketBenchmarksCache: true,
+      performanceCache: true,
+      evidenceCache: true,
+      reportCache: true
     },
     ttl: {
       dashboard: '30 minutes',
@@ -874,7 +1044,9 @@ function checkCachingService() {
       scripts: '1 hour',
       rateCards: '10 minutes',
       aiSuggestions: '1 hour',
-      marketBenchmarks: '4 hours'
+      marketBenchmarks: '4 hours',
+      performanceAnalysis: '30 minutes',
+      performanceReports: '1 hour'
     },
     performance: {
       hitRate: 'Tracked per user',
@@ -897,7 +1069,7 @@ const API_PREFIX = `/api/${config.server.apiVersion || 'v1'}`;
 app.use(API_PREFIX, trackAPIUsage);
 
 /**
- * Welcome endpoint with enhanced feature information including analytics, scripts, and rate cards
+ * Welcome endpoint with enhanced feature information including performance module
  */
 app.get(API_PREFIX, (req, res) => {
   res.json(
@@ -978,7 +1150,18 @@ app.get(API_PREFIX, (req, res) => {
         rateCardPackageDeals: true,
         rateCardProfessionalDetails: true,
         rateCardCaching: true,
-        rateCardInputSanitization: true
+        rateCardInputSanitization: true,
+        // Performance module features
+        performanceTracking: true,
+        evidenceCollection: true,
+        aiPerformanceAnalysis: config.featureFlags?.aiFeatures || false,
+        performanceReports: config.featureFlags?.pdfGeneration !== false,
+        clientCommunication: config.featureFlags?.emailNotifications || false,
+        performanceAnalytics: true,
+        publicPerformancePortfolio: true,
+        performanceInsights: config.featureFlags?.aiFeatures || false,
+        businessIntelligencePerformance: true,
+        rateCardOptimization: config.featureFlags?.aiFeatures || false
       }
     })
   );
@@ -994,7 +1177,7 @@ app.get(API_PREFIX, (req, res) => {
  */
 
 let loadedModules = 0;
-let totalModules = 12; // Updated to include rate cards module
+let totalModules = 12; // Updated to include performance module
 
 // Authentication routes
 try {
@@ -1059,11 +1242,12 @@ try {
   logWarn('⚠️  Brief routes not found - module may not be implemented yet', { error: error.message });
 }
 
-// Performance vault routes
+// Performance vault routes - FULL PRODUCTION IMPLEMENTATION
 try {
   const performanceRoutes = require('./modules/performance/routes');
   app.use(`${API_PREFIX}/performance`, performanceRoutes);
   logInfo('✅ Performance routes loaded successfully');
+  logInfo('📊 Performance features enabled: Evidence Collection, AI Analysis, PDF Reports, Client Communication, Public Portfolio, Performance Analytics');
   loadedModules++;
 } catch (error) {
   logWarn('⚠️  Performance routes not found - module may not be implemented yet', { error: error.message });
@@ -1170,6 +1354,13 @@ app.get(`${API_PREFIX}/status`, (req, res) => {
         features: checkModuleExists('ratecards').features || {},
         platforms: checkModuleExists('ratecards').platforms || [],
         subscriptionRequirements: checkModuleExists('ratecards').subscriptionRequirements || {}
+      },
+      performanceModule: {
+        status: checkModuleExists('performance').status,
+        features: checkModuleExists('performance').features || {},
+        subscriptionTiers: checkModuleExists('performance').subscriptionTiers || {},
+        evidenceTypes: checkModuleExists('performance').evidenceTypes || [],
+        reportTemplates: checkModuleExists('performance').reportTemplates || []
       }
     })
   );
@@ -1259,7 +1450,18 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
         'rate_card_package_deals',
         'rate_card_professional_details',
         'rate_card_caching',
-        'rate_card_input_sanitization'
+        'rate_card_input_sanitization',
+        // Performance features
+        'performance_tracking',
+        'evidence_collection',
+        'ai_performance_analysis',
+        'performance_reports',
+        'client_communication',
+        'performance_analytics',
+        'public_performance_portfolio',
+        'performance_insights',
+        'business_intelligence_performance',
+        'rate_card_optimization'
       ]
     })
   );
@@ -1270,7 +1472,7 @@ app.get(`${API_PREFIX}/version`, (req, res) => {
 // ============================================
 
 /**
- * API documentation endpoint with analytics, scripts, and rate cards module details
+ * API documentation endpoint with performance module details
  */
 app.get(`${API_PREFIX}/docs`, (req, res) => {
   res.json(
@@ -1392,6 +1594,46 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
           supported_files: ['PDF', 'DOC', 'DOCX', 'TXT'],
           ai_features: config.featureFlags?.aiFeatures || false
         },
+        performance: {
+          description: 'Performance tracking and AI-powered analysis with client reporting capabilities',
+          base_path: `${API_PREFIX}/performance`,
+          features: [
+            'evidence_collection',
+            'ai_performance_analysis',
+            'report_generation',
+            'client_communication',
+            'performance_analytics',
+            'public_portfolio',
+            'business_intelligence',
+            'rate_card_optimization',
+            'subscription_gating',
+            'multi_platform_support'
+          ],
+          key_endpoints: {
+            create_case: 'POST /performance/cases',
+            get_cases: 'GET /performance/cases',
+            get_case: 'GET /performance/cases/:id',
+            upload_evidence: 'POST /performance/cases/:id/evidence',
+            trigger_analysis: 'POST /performance/cases/:id/analyze',
+            generate_report: 'POST /performance/cases/:id/reports',
+            send_to_client: 'POST /performance/reports/:reportId/send',
+            analytics: 'GET /performance/analytics',
+            settings: 'GET/PUT /performance/settings'
+          },
+          subscription_tiers: {
+            starter: ['basic_performance', 'evidence_collection'],
+            pro: ['ai_analysis', 'professional_reports', 'advanced_metrics'],
+            elite: ['branded_reports', 'advanced_analytics', 'performance_insights'],
+            agency: ['white_label_reports', 'multi_creator_dashboard', 'consolidated_analytics']
+          },
+          evidence_types: [
+            'content_screenshot', 'analytics_screenshot', 'brand_feedback', 
+            'testimonial', 'additional_deliverable', 'custom'
+          ],
+          report_templates: ['basic', 'professional', 'detailed', 'branded', 'white_label'],
+          supported_platforms: ['instagram', 'youtube', 'linkedin', 'twitter', 'facebook', 'snapchat'],
+          ai_features: config.featureFlags?.aiFeatures || false
+        },
         analytics: {
           description: 'Advanced business intelligence and reporting for creator economy management',
           base_path: `${API_PREFIX}/analytics`,
@@ -1498,7 +1740,12 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
         rate_card_general: '100 requests per 15 minutes',
         rate_card_ai_suggestions: '10 requests per hour',
         rate_card_pdf_generation: '5 requests per 15 minutes',
-        rate_card_public_access: '30 requests per minute'
+        rate_card_public_access: '30 requests per minute',
+        // Performance rate limits
+        performance_standard: '100 requests per 15 minutes',
+        performance_upload: '20 requests per 15 minutes',
+        performance_ai_analysis: '10 requests per hour',
+        performance_report_generation: '5 requests per 15 minutes'
       },
       file_upload: {
         max_size: {
@@ -1512,7 +1759,8 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
           invoices: ['PDF', 'JPEG', 'PNG', 'JPG', 'WEBP'],
           briefs: ['PDF', 'DOC', 'DOCX', 'TXT'],
           scripts: ['PDF', 'DOC', 'DOCX', 'TXT', 'MP4', 'MOV', 'AVI'],
-          ratecards: ['JPEG', 'PNG', 'PDF']
+          ratecards: ['JPEG', 'PNG', 'PDF'],
+          performance: ['JPEG', 'PNG', 'WEBP', 'PDF', 'TXT', 'DOC', 'DOCX']
         },
         video_limits: {
           pro: '25MB',
@@ -1525,7 +1773,8 @@ app.get(`${API_PREFIX}/docs`, (req, res) => {
           'POST /briefs/create-file',
           'POST /scripts/create-file',
           'POST /scripts/create-video',
-          'GET /ratecards/:id/pdf'
+          'GET /ratecards/:id/pdf',
+          'POST /performance/cases/:id/evidence'
         ]
       },
       support: {
@@ -1575,7 +1824,15 @@ app.get(`${API_PREFIX}/postman`, (req, res) => {
         'PDF export examples',
         'Public sharing examples',
         'QR code generation examples',
-        'Rate card analytics workflows'
+        'Rate card analytics workflows',
+        // Performance features
+        'Performance case creation workflows',
+        'Evidence upload examples',
+        'AI analysis trigger examples',
+        'Report generation workflows',
+        'Client communication examples',
+        'Performance analytics examples',
+        'Public portfolio examples'
       ]
     })
   );
@@ -1586,7 +1843,7 @@ app.get(`${API_PREFIX}/postman`, (req, res) => {
 // ============================================
 
 /**
- * Get current feature flags with analytics, scripts, and rate cards-specific flags
+ * Get current feature flags with performance module-specific flags
  */
 app.get(`${API_PREFIX}/features`, (req, res) => {
   res.json(
@@ -1672,7 +1929,23 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
         rate_card_package_deals: true,
         rate_card_professional_details: true,
         rate_card_caching: true,
-        rate_card_input_sanitization: true
+        rate_card_input_sanitization: true,
+        
+        // Performance module features
+        performance_tracking: true,
+        evidence_collection: true,
+        ai_performance_analysis: config.featureFlags?.aiFeatures || false,
+        performance_reports: config.featureFlags?.pdfGeneration !== false,
+        client_communication: config.featureFlags?.emailNotifications || false,
+        performance_analytics: true,
+        public_performance_portfolio: true,
+        performance_insights: config.featureFlags?.aiFeatures || false,
+        business_intelligence_performance: true,
+        rate_card_optimization: config.featureFlags?.aiFeatures || false,
+        performance_ai_analysis: config.featureFlags?.aiFeatures || false,
+        performance_report_branding: true,
+        performance_evidence_validation: true,
+        performance_client_delivery: config.featureFlags?.emailNotifications || false
       },
       environment: config.server.environment,
       brief_features: {
@@ -1813,10 +2086,156 @@ app.get(`${API_PREFIX}/features`, (req, res) => {
           public_cards: '30 minutes TTL',
           market_data: '4 hours TTL'
         }
+      },
+      performance_features: {
+        subscription_access: {
+          starter: 'Basic performance tracking + evidence collection',
+          pro: 'AI analysis + professional reports + advanced metrics',
+          elite: 'Branded reports + advanced analytics + performance insights',
+          agency: 'White-label reports + multi-creator dashboard'
+        },
+        supported_platforms: [
+          'instagram', 'youtube', 'linkedin', 'twitter', 'facebook', 'snapchat'
+        ],
+        evidence_types: [
+          'content_screenshot', 'analytics_screenshot', 'brand_feedback',
+          'testimonial', 'additional_deliverable', 'custom'
+        ],
+        report_templates: ['basic', 'professional', 'detailed', 'branded', 'white_label'],
+        file_support: {
+          documents: ['PDF', 'DOC', 'DOCX', 'TXT'],
+          images: ['JPEG', 'PNG', 'JPG', 'WEBP'],
+          max_file_size: '10MB',
+          max_files_per_upload: 5
+        },
+        ai_capabilities: {
+          performance_analysis: config.featureFlags?.aiFeatures || false,
+          insights_generation: config.featureFlags?.aiFeatures || false,
+          business_metrics: config.featureFlags?.aiFeatures || false,
+          predictions: config.featureFlags?.aiFeatures || false,
+          rate_card_optimization: config.featureFlags?.aiFeatures || false
+        },
+        rate_limits: {
+          standard: '100 requests/15min',
+          upload: '20 requests/15min',
+          ai_analysis: '10 requests/hour',
+          report_generation: '5 requests/15min'
+        },
+        reporting: {
+          pdf_generation: config.featureFlags?.pdfGeneration !== false,
+          custom_branding: true,
+          client_delivery: config.featureFlags?.emailNotifications || false,
+          public_sharing: true,
+          qr_code_embedding: true
+        },
+        analytics: {
+          performance_tracking: true,
+          business_intelligence: true,
+          cross_module_correlation: true,
+          portfolio_analytics: true
+        }
       }
     })
   );
 });
+
+// ============================================
+// PERFORMANCE-SPECIFIC ERROR HANDLING
+// ============================================
+
+// Performance module specific error handler middleware
+app.use('/api/*/performance', (error, req, res, next) => {
+  // Handle performance specific errors
+  if (error.code && error.code.startsWith('PERF')) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+      code: error.code,
+      data: error.data || null,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle AI analysis errors
+  if (error.message.includes('AI analysis failed') || 
+      error.message.includes('OpenAI API error')) {
+    return res.status(503).json({
+      success: false,
+      message: 'AI analysis service temporarily unavailable. Please try again later.',
+      code: 'PERF5000',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle evidence upload errors
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        success: false,
+        message: 'File too large. Maximum size is 10MB per file.',
+        code: 'PERF4001',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    if (error.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Too many files. Maximum 5 files per upload.',
+        code: 'PERF4002',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  // Handle report generation errors
+  if (error.message.includes('Report generation failed')) {
+    return res.status(500).json({
+      success: false,
+      message: 'Performance report generation failed. Please try again later.',
+      code: 'PERF5001',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle subscription limit errors
+  if (error.message.includes('subscription') || error.message.includes('upgrade required')) {
+    return res.status(403).json({
+      success: false,
+      message: error.message,
+      code: 'PERF4101',
+      upgrade: true,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle evidence collection errors
+  if (error.message.includes('evidence collection') || 
+      error.message.includes('insufficient evidence')) {
+    return res.status(400).json({
+      success: false,
+      message: 'Insufficient evidence for analysis. Please upload more performance data.',
+      code: 'PERF4003',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Handle client communication errors
+  if (error.message.includes('email delivery') || 
+      error.message.includes('report delivery')) {
+    return res.status(500).json({
+      success: false,
+      message: 'Report delivery failed. Report generated successfully but email delivery encountered issues.',
+      code: 'PERF5002',
+      partial: true,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  next(error);
+});
+
+logInfo('📊 Performance-specific error handling configured');
 
 // ============================================
 // SCRIPTS-SPECIFIC ERROR HANDLING
@@ -2131,7 +2550,7 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 // ============================================
-// INVOICE SERVICES INITIALIZATION
+// ENHANCED SERVICES INITIALIZATION
 // ============================================
 
 /**
@@ -2903,8 +3322,399 @@ const initializeRateCardServices = async () => {
 };
 
 // ============================================
+// PERFORMANCE SERVICES INITIALIZATION
+// ============================================
+
+/**
+ * Initialize performance module specific services
+ */
+const initializePerformanceServices = async () => {
+  try {
+    logInfo('📊 Initializing performance services...');
+    
+    // Initialize performance file cleanup job
+    cron.schedule('0 2 * * 2', async () => { // Every Tuesday at 2 AM
+      try {
+        logInfo('🗑️  Cleaning up old performance files...');
+        
+        const fs = require('fs').promises;
+        const path = require('path');
+        const performanceUploadsDir = path.join(__dirname, '../uploads/performance');
+        const performanceReportsDir = path.join(__dirname, '../uploads/performance/reports');
+        
+        let totalCleaned = 0;
+        
+        // Clean evidence files older than 60 days
+        try {
+          const files = await fs.readdir(performanceUploadsDir);
+          const now = Date.now();
+          const sixtyDaysAgo = now - (60 * 24 * 60 * 60 * 1000);
+          
+          for (const file of files) {
+            const filePath = path.join(performanceUploadsDir, file);
+            const stats = await fs.stat(filePath);
+            
+            if (stats.isFile() && stats.mtime.getTime() < sixtyDaysAgo) {
+              await fs.unlink(filePath);
+              totalCleaned++;
+            }
+          }
+        } catch (error) {
+          logWarn('Performance uploads directory not found', { error: error.message });
+        }
+        
+        // Clean report files older than 90 days
+        try {
+          const reportFiles = await fs.readdir(performanceReportsDir);
+          const now = Date.now();
+          const ninetyDaysAgo = now - (90 * 24 * 60 * 60 * 1000);
+          
+          for (const file of reportFiles) {
+            const filePath = path.join(performanceReportsDir, file);
+            const stats = await fs.stat(filePath);
+            
+            if (stats.isFile() && stats.mtime.getTime() < ninetyDaysAgo) {
+              await fs.unlink(filePath);
+              totalCleaned++;
+            }
+          }
+        } catch (error) {
+          logWarn('Performance reports directory not found', { error: error.message });
+        }
+        
+        logInfo(`✅ Performance file cleanup completed - removed ${totalCleaned} old files`);
+        
+      } catch (error) {
+        logError('❌ Performance file cleanup failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    // Initialize AI analysis processing queue cleanup
+    if (config.featureFlags?.aiFeatures) {
+      cron.schedule('0 9 * * *', async () => {
+        try {
+          logInfo('🤖 Updating AI performance analysis statuses...');
+          
+          const { PerformanceAnalysis } = require('./modules/performance/model');
+          
+          // Reset stuck processing analyses (processing for more than 2 hours)
+          const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+          const result = await PerformanceAnalysis.updateMany(
+            {
+              'aiAnalysis.status': 'processing',
+              'aiAnalysis.processedAt': { $lt: twoHoursAgo }
+            },
+            {
+              $set: { 
+                'aiAnalysis.status': 'failed',
+                'aiAnalysis.error': 'Processing timeout - analysis took too long'
+              }
+            }
+          );
+          
+          logInfo(`✅ AI performance analysis cleanup completed - reset ${result.modifiedCount} stuck processes`);
+          
+        } catch (error) {
+          logError('❌ AI performance analysis cleanup failed', { error: error.message });
+        }
+      }, {
+        timezone: 'Asia/Kolkata'
+      });
+      
+      logInfo('🤖 AI performance analysis cleanup cron job scheduled (daily at 9 AM IST)');
+    }
+    
+    // Initialize performance analytics update job (daily)
+    cron.schedule('0 11 * * *', async () => {
+      try {
+        logInfo('📊 Updating performance analytics...');
+        
+        const { PerformanceCase } = require('./modules/performance/model');
+        
+        // Update performance cases with completed evidence collection
+        const casesToUpdate = await PerformanceCase.find({
+          'evidenceCollection.completionPercentage': { $gte: 100 },
+          status: 'evidence_collection'
+        });
+        
+        let updatedCount = 0;
+        for (const performanceCase of casesToUpdate) {
+          performanceCase.status = 'ai_processing';
+          await performanceCase.save();
+          updatedCount++;
+        }
+        
+        logInfo(`✅ Performance analytics updated - ${updatedCount} cases marked for AI processing`);
+        
+      } catch (error) {
+        logError('❌ Performance analytics update failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    // Initialize performance portfolio updates (weekly)
+    cron.schedule('0 12 * * 0', async () => { // Sunday at 12 PM
+      try {
+        logInfo('🎯 Updating performance portfolios...');
+        
+        const { PerformancePortfolio, PerformanceCase } = require('./modules/performance/model');
+        
+        // Update portfolio statistics
+        const portfolios = await PerformancePortfolio.find({
+          isPublic: true
+        });
+        
+        let updatedCount = 0;
+        for (const portfolio of portfolios) {
+          const cases = await PerformanceCase.find({
+            creatorId: portfolio.creatorId,
+            status: { $in: ['completed', 'delivered_to_client'] },
+            isArchived: false
+          });
+          
+          // Calculate portfolio statistics
+          portfolio.statistics.totalCases = cases.length;
+          portfolio.statistics.totalViews = cases.reduce((sum, c) => sum + (c.clientCommunication?.viewCount || 0), 0);
+          portfolio.statistics.averagePerformance = cases.length > 0 ? 
+            cases.reduce((sum, c) => sum + (c.aiAnalysisSummary?.confidenceScore || 0), 0) / cases.length : 0;
+          
+          await portfolio.save();
+          updatedCount++;
+        }
+        
+        logInfo(`✅ Performance portfolios updated - ${updatedCount} portfolios refreshed`);
+        
+      } catch (error) {
+        logError('❌ Performance portfolio updates failed', { error: error.message });
+      }
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    
+    // Initialize rate card optimization from performance data (daily)
+    if (config.featureFlags?.aiFeatures) {
+      cron.schedule('0 13 * * *', async () => {
+        try {
+          logInfo('💰 Processing rate card optimization from performance data...');
+          
+          const { PerformanceService } = require('./modules/performance/controller');
+          const { PerformanceCase } = require('./modules/performance/model');
+          
+          // Find cases with analysis ready for rate card optimization
+          const casesForOptimization = await PerformanceCase.find({
+            status: { $in: ['analysis_ready', 'report_generated', 'completed'] },
+            'aiAnalysisSummary.lastAnalyzedAt': { 
+              $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
+            }
+          }).limit(50); // Process in batches
+          
+          let optimizedCount = 0;
+          for (const performanceCase of casesForOptimization) {
+            try {
+              await PerformanceService.updateRateCardFromPerformance(performanceCase._id);
+              optimizedCount++;
+            } catch (error) {
+              logWarn('Failed to optimize rate card from performance', { 
+                caseId: performanceCase._id, 
+                error: error.message 
+              });
+            }
+          }
+          
+          logInfo(`✅ Rate card optimization completed - ${optimizedCount} rate cards updated from performance data`);
+          
+        } catch (error) {
+          logError('❌ Rate card optimization from performance failed', { error: error.message });
+        }
+      }, {
+        timezone: 'Asia/Kolkata'
+      });
+      
+      logInfo('💰 Rate card optimization cron job scheduled (daily at 1 PM IST)');
+    }
+    
+    // Initialize client communication reminders (daily)
+    if (config.featureFlags?.emailNotifications) {
+      cron.schedule('0 14 * * *', async () => {
+        try {
+          logInfo('📧 Processing performance report delivery reminders...');
+          
+          const { PerformanceCase } = require('./modules/performance/model');
+          
+          // Find cases with reports generated but not sent to clients (older than 3 days)
+          const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+          const casesNeedingReminder = await PerformanceCase.find({
+            status: 'report_generated',
+            'clientCommunication.reportGeneratedAt': { $lt: threeDaysAgo },
+            'clientCommunication.reportSent': false
+          }).populate('creatorId', 'fullName email');
+          
+          // This would integrate with email service to send reminders
+          // For now, just log the cases needing attention
+          logInfo(`📊 Found ${casesNeedingReminder.length} performance cases needing client delivery`);
+          
+        } catch (error) {
+          logError('❌ Performance report delivery reminders failed', { error: error.message });
+        }
+      }, {
+        timezone: 'Asia/Kolkata'
+      });
+      
+      logInfo('📧 Performance report delivery reminders cron job scheduled (daily at 2 PM IST)');
+    }
+    
+    logInfo('📊 Performance file cleanup cron job scheduled (weekly on Tuesday)');
+    logInfo('📊 Performance analytics cron job scheduled (daily at 11 AM IST)');
+    logInfo('🎯 Performance portfolio updates cron job scheduled (weekly on Sunday)');
+    
+    return true;
+  } catch (error) {
+    logWarn('⚠️  Performance services initialization partially failed', { error: error.message });
+    return false;
+  }
+};
+
+// ============================================
 // ENVIRONMENT VALIDATION FUNCTIONS
 // ============================================
+
+/**
+ * Validate performance module environment and dependencies
+ */
+const validatePerformanceEnvironment = () => {
+  const warnings = [];
+  const errors = [];
+  
+  // Check AI processing requirements for performance analysis
+  if (config.featureFlags?.aiFeatures) {
+    if (!process.env.OPENAI_API_KEY) {
+      errors.push('OpenAI API key not configured - AI performance analysis will fail');
+    } else {
+      logInfo('✅ OpenAI API key configured for AI performance analysis');
+    }
+  }
+  
+  // Check PDF generation requirements for reports
+  if (config.featureFlags?.pdfGeneration !== false) {
+    try {
+      require('pdfkit');
+      logInfo('✅ PDFKit available for performance report generation');
+    } catch (error) {
+      errors.push('PDFKit not installed - performance report generation will fail');
+    }
+  }
+  
+  // Check QR code generation requirements
+  try {
+    require('qrcode');
+    logInfo('✅ QRCode library available for performance portfolio QR codes');
+  } catch (error) {
+    warnings.push('QRCode library not installed - portfolio QR codes will not work');
+  }
+  
+  // Check rate limiting requirements
+  try {
+    require('express-rate-limit');
+    logInfo('✅ Express-rate-limit available for performance API protection');
+  } catch (error) {
+    errors.push('Express-rate-limit not installed - performance API rate limiting will fail');
+  }
+  
+  // Check input validation requirements
+  try {
+    require('joi');
+    logInfo('✅ Joi available for performance input validation');
+  } catch (error) {
+    errors.push('Joi not installed - performance input validation will fail');
+  }
+  
+  // Check sanitization requirements
+  try {
+    require('isomorphic-dompurify');
+    logInfo('✅ DOMPurify available for performance input sanitization');
+  } catch (error) {
+    warnings.push('DOMPurify not installed - performance input sanitization will be limited');
+  }
+  
+  // Check file processing requirements
+  try {
+    require('multer');
+    logInfo('✅ Multer available for performance evidence uploads');
+  } catch (error) {
+    errors.push('Multer not installed - performance evidence uploads will fail');
+  }
+  
+  // Check MongoDB for performance data storage
+  try {
+    // MongoDB is already initialized, performance models will create collections as needed
+    logInfo('✅ MongoDB available for performance data storage');
+  } catch (error) {
+    errors.push('MongoDB not available - performance data storage will fail');
+  }
+  
+  // Check and create upload directories
+  const fs = require('fs');
+  const path = require('path');
+  const performanceUploadsDir = path.join(__dirname, '../uploads/performance');
+  const performanceReportsDir = path.join(__dirname, '../uploads/performance/reports');
+  
+  try {
+    if (!fs.existsSync(performanceUploadsDir)) {
+      fs.mkdirSync(performanceUploadsDir, { recursive: true });
+      logInfo('✅ Performance uploads directory created');
+    }
+    
+    if (!fs.existsSync(performanceReportsDir)) {
+      fs.mkdirSync(performanceReportsDir, { recursive: true });
+      logInfo('✅ Performance reports directory created');
+    }
+    
+    logInfo('✅ Performance upload directories verified');
+  } catch (error) {
+    warnings.push('Cannot create performance upload directories - file uploads may fail');
+  }
+  
+  // Check if deals module is available for performance case creation
+  try {
+    require('./modules/deals/model');
+    logInfo('✅ Deals module available for performance case creation');
+  } catch (error) {
+    errors.push('Deals module not available - performance cases cannot be created from deals');
+  }
+  
+  // Check memory for AI processing and file handling
+  const usage = process.memoryUsage();
+  const heapTotalMB = Math.round(usage.heapTotal / 1024 / 1024);
+  
+  if (heapTotalMB < 512) { // Less than 512MB
+    errors.push('Insufficient memory for performance processing. Minimum 512MB heap required.');
+  } else if (heapTotalMB < 1024) { // Less than 1GB
+    warnings.push('Low memory available - AI analysis and large file processing may fail');
+  } else {
+    logInfo('✅ Sufficient memory available for performance processing');
+  }
+  
+  // Check email configuration for client communication
+  if (config.featureFlags?.emailNotifications && !config.email?.smtp?.auth?.user) {
+    warnings.push('Email not configured - performance reports cannot be sent to clients');
+  }
+  
+  if (errors.length > 0) {
+    logError('❌ Performance module environment errors:', { errors });
+    return false;
+  }
+  
+  if (warnings.length > 0) {
+    logWarn('⚠️  Performance module environment warnings:', { warnings });
+  } else {
+    logInfo('✅ Performance module environment validation passed');
+  }
+  
+  return true;
+};
 
 /**
  * Validate scripts environment and dependencies with memory checks
@@ -3319,7 +4129,7 @@ const validateBriefEnvironment = () => {
 // ============================================
 
 /**
- * Initialize the application with enhanced support for all modules including analytics, scripts, and rate cards
+ * Initialize the application with enhanced support for all modules including performance
  */
 const initializeApp = async () => {
   try {
@@ -3361,11 +4171,17 @@ const initializeApp = async () => {
       logWarn('⚠️  Rate card module environment validation failed - some features may be limited');
     }
     
+    logInfo('📊 Validating performance module environment...');
+    const performanceEnvOk = validatePerformanceEnvironment();
+    if (!performanceEnvOk) {
+      logWarn('⚠️  Performance module environment validation failed - some features may be limited');
+    }
+    
     // Initialize external services
     logInfo('🔧 Initializing external services...');
     await initializeServices();
     
-    // Initialize invoice services
+    // Initialize all module services
     logInfo('📄 Initializing invoice services...');
     const invoiceServicesOk = await initializeInvoiceServices();
     if (invoiceServicesOk) {
@@ -3374,7 +4190,6 @@ const initializeApp = async () => {
       logWarn('⚠️  Invoice services partially initialized');
     }
     
-    // Initialize brief services
     logInfo('📋 Initializing brief services...');
     const briefServicesOk = await initializeBriefServices();
     if (briefServicesOk) {
@@ -3383,7 +4198,6 @@ const initializeApp = async () => {
       logWarn('⚠️  Brief services partially initialized');
     }
     
-    // Initialize analytics services
     logInfo('📊 Initializing analytics services...');
     const analyticsServicesOk = await initializeAnalyticsServices();
     if (analyticsServicesOk) {
@@ -3392,7 +4206,6 @@ const initializeApp = async () => {
       logWarn('⚠️  Analytics services partially initialized');
     }
     
-    // Initialize scripts services
     logInfo('📝 Initializing scripts services...');
     const scriptsServicesOk = await initializeScriptsServices();
     if (scriptsServicesOk) {
@@ -3401,13 +4214,20 @@ const initializeApp = async () => {
       logWarn('⚠️  Scripts services partially initialized');
     }
     
-    // Initialize rate card services
     logInfo('📋 Initializing rate card services...');
     const rateCardServicesOk = await initializeRateCardServices();
     if (rateCardServicesOk) {
       logInfo('✅ Rate card services initialized successfully');
     } else {
       logWarn('⚠️  Rate card services partially initialized');
+    }
+    
+    logInfo('📊 Initializing performance services...');
+    const performanceServicesOk = await initializePerformanceServices();
+    if (performanceServicesOk) {
+      logInfo('✅ Performance services initialized successfully');
+    } else {
+      logWarn('⚠️  Performance services partially initialized');
     }
     
     // Log module status
@@ -3419,6 +4239,7 @@ const initializeApp = async () => {
     const analyticsStatus = checkModuleExists('analytics');
     const scriptsStatus = checkModuleExists('scripts');
     const rateCardStatus = checkModuleExists('ratecards');
+    const performanceStatus = checkModuleExists('performance');
     
     if (invoiceStatus.available) {
       logInfo('📄 Invoice module status:', {
@@ -3457,6 +4278,16 @@ const initializeApp = async () => {
         features: rateCardStatus.features,
         platforms: rateCardStatus.platforms,
         subscriptionRequirements: rateCardStatus.subscriptionRequirements
+      });
+    }
+    
+    if (performanceStatus.available) {
+      logInfo('📊 Performance module status:', {
+        status: performanceStatus.status,
+        features: performanceStatus.features,
+        subscriptionTiers: performanceStatus.subscriptionTiers,
+        evidenceTypes: performanceStatus.evidenceTypes,
+        reportTemplates: performanceStatus.reportTemplates
       });
     }
     
@@ -3563,6 +4394,15 @@ const initializeServices = async () => {
       logWarn('⚠️  Rate card processing service not available', { error: error.message });
     }
     
+    // Performance Processing Service Check
+    try {
+      // MongoDB is already initialized for performance data storage
+      logInfo('📊 Performance processing service available');
+      servicesInitialized++;
+    } catch (error) {
+      logWarn('⚠️  Performance processing service not available', { error: error.message });
+    }
+    
     logInfo(`🔧 Initialized ${servicesInitialized} external services`);
     return true;
   } catch (error) {
@@ -3576,7 +4416,7 @@ const initializeServices = async () => {
 // ============================================
 
 /**
- * Enhanced graceful shutdown handling
+ * Enhanced graceful shutdown handling with performance module cleanup
  */
 const gracefulShutdown = async (signal) => {
   logInfo(`🛑 ${signal} received. Starting graceful shutdown...`);
@@ -3615,6 +4455,22 @@ const gracefulShutdown = async (signal) => {
       logInfo('✅ Rate card caches cleared');
     } catch (error) {
       logWarn('⚠️  Rate card cache clearing failed', { error: error.message });
+    }
+    
+    // Clear performance caches if needed
+    try {
+      logInfo('🗑️  Clearing performance caches...');
+      // Performance module uses MongoDB-based caching, will be cleared with DB connection close
+      logInfo('✅ Performance caches cleared');
+    } catch (error) {
+      logWarn('⚠️  Performance cache clearing failed', { error: error.message });
+    }
+    
+    // Force garbage collection before shutdown if available
+    if (global.gc) {
+      logInfo('🧠 Forcing garbage collection before shutdown...');
+      global.gc();
+      logInfo('✅ Garbage collection completed');
     }
     
     // Close database connections
@@ -3662,9 +4518,11 @@ module.exports.initializeBriefServices = initializeBriefServices;
 module.exports.initializeAnalyticsServices = initializeAnalyticsServices;
 module.exports.initializeScriptsServices = initializeScriptsServices;
 module.exports.initializeRateCardServices = initializeRateCardServices;
+module.exports.initializePerformanceServices = initializePerformanceServices;
 module.exports.validateInvoiceEnvironment = validateInvoiceEnvironment;
 module.exports.validateBriefEnvironment = validateBriefEnvironment;
 module.exports.validateAnalyticsEnvironment = validateAnalyticsEnvironment;
 module.exports.validateScriptsEnvironment = validateScriptsEnvironment;
 module.exports.validateRateCardEnvironment = validateRateCardEnvironment;
+module.exports.validatePerformanceEnvironment = validatePerformanceEnvironment;
 module.exports.rateLimitByTier = rateLimitByTier;

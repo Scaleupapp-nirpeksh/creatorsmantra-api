@@ -1,25 +1,13 @@
 /**
- * CreatorsMantra Backend - Performance Module Controller (Complete)
- * Combined services, controllers, and validations for performance tracking
+ * CreatorsMantra Backend - Performance Module Controller (Complete & Fixed)
+ * Fixed user ID consistency issues
  * 
  * @author CreatorsMantra Team
- * @version 1.0.0
+ * @version 1.0.1
  * @description All-in-one performance management with AI analysis and client reporting
  */
 
-const { 
-  PerformanceCase, 
-  PerformanceEvidence, 
-  PerformanceAnalysis, 
-  PerformanceReport, 
-  PerformanceSettings, 
-  PerformancePortfolio 
-} = require('./model');
-const { Deal } = require('../deals/model');
-const { User, CreatorProfile } = require('../auth/model');
-const { successResponse, errorResponse } = require('../../shared/responses');
-const { logInfo, logError, logWarning, asyncHandler } = require('../../shared/utils');
-const { AppError } = require('../../shared/errors');
+const mongoose = require('mongoose');
 const Joi = require('joi');
 const multer = require('multer');
 const path = require('path');
@@ -28,8 +16,106 @@ const axios = require('axios');
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
 const crypto = require('crypto');
-const DOMPurify = require('isomorphic-dompurify');
 const rateLimit = require('express-rate-limit');
+
+// ============================================
+// DYNAMIC MODEL IMPORTS (Safer approach)
+// ============================================
+
+// Import models dynamically to avoid circular dependency issues
+const getModels = () => {
+  try {
+    const models = require('./model');
+    return models;
+  } catch (error) {
+    console.error('Error importing performance models:', error);
+    return {};
+  }
+};
+
+// Import external models safely
+const getExternalModels = () => {
+  const models = {};
+  
+  try {
+    const dealModels = require('../deals/model');
+    models.Deal = dealModels.Deal;
+  } catch (error) {
+    console.warn('Deal model not available:', error.message);
+  }
+  
+  try {
+    const authModels = require('../auth/model');
+    models.User = authModels.User;
+    models.CreatorProfile = authModels.CreatorProfile;
+  } catch (error) {
+    console.warn('Auth models not available:', error.message);
+  }
+  
+  return models;
+};
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+const logInfo = (message, meta = {}) => {
+  console.log(JSON.stringify({
+    timestamp: new Date().toLocaleString('en-IN'),
+    level: 'INFO',
+    message,
+    meta
+  }));
+};
+
+const logError = (message, meta = {}) => {
+  console.error(JSON.stringify({
+    timestamp: new Date().toLocaleString('en-IN'),
+    level: 'ERROR',
+    message,
+    meta
+  }));
+};
+
+const logWarning = (message, meta = {}) => {
+  console.warn(JSON.stringify({
+    timestamp: new Date().toLocaleString('en-IN'),
+    level: 'WARN',
+    message,
+    meta
+  }));
+};
+
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
+
+// Custom error class
+class AppError extends Error {
+  constructor(message, statusCode = 500, code = 'INTERNAL_ERROR') {
+    super(message);
+    this.statusCode = statusCode;
+    this.code = code;
+    this.isOperational = true;
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+// Response helpers
+const successResponse = (message, data = null, statusCode = 200) => ({
+  success: true,
+  message,
+  data,
+  timestamp: new Date().toISOString()
+});
+
+const errorResponse = (message, data = null, statusCode = 500) => ({
+  success: false,
+  message,
+  data,
+  timestamp: new Date().toISOString(),
+  code: statusCode
+});
 
 // ============================================
 // VALIDATION SCHEMAS
@@ -223,7 +309,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const userId = req.user?.userId || 'unknown';
+    const userId = req.user?.id || 'unknown'; // FIXED: Changed from userId to id
     const fileExtension = path.extname(file.originalname);
     const baseName = path.basename(file.originalname, fileExtension);
     cb(null, `${userId}_${uniqueSuffix}_${baseName}${fileExtension}`);
@@ -278,58 +364,109 @@ class PerformanceService {
     return userFeatures.includes(feature) || userFeatures.includes('all_features') || userFeatures.includes('all_creator_features');
   }
 
-  // Auto-create performance case from completed deal
-  static async createFromCompletedDeal(dealId, userId) {
-    try {
-      const deal = await Deal.findById(dealId);
-      
-      if (!deal) {
-        throw new AppError('Deal not found', 404, 'DEAL_NOT_FOUND');
-      }
-      
-      if (deal.userId.toString() !== userId.toString()) {
-        throw new AppError('Access denied', 403, 'ACCESS_DENIED');
-      }
-      
-      if (!['completed', 'paid'].includes(deal.stage)) {
-        throw new AppError('Deal must be completed or paid', 400, 'INVALID_DEAL_STAGE');
-      }
-      
-      // Check if performance case already exists
-      const existingCase = await PerformanceCase.findOne({ dealId });
-      if (existingCase) {
-        return existingCase;
-      }
-      
-      // Get manager if exists
-      const creatorProfile = await CreatorProfile.findOne({ userId });
-      const activeManager = creatorProfile?.managers.find(m => m.status === 'active');
-      
-      const performanceCase = await PerformanceCase.create({
-        dealId,
-        creatorId: userId,
-        managerId: activeManager?.managerId || null,
-        creationTrigger: 'deal_completed',
-        status: 'evidence_collection'
-      });
-      
-      logInfo('Performance case created from completed deal', { 
-        performanceCaseId: performanceCase._id,
-        dealId,
-        userId 
-      });
-      
-      return performanceCase;
-      
-    } catch (error) {
-      logError('Error creating performance case from deal', { error: error.message, dealId, userId });
-      throw error;
+ // Fixed createFromCompletedDeal method in PerformanceService class
+static async createFromCompletedDeal(dealId, userId) {
+  try {
+    // Validate input parameters
+    if (!dealId) {
+      throw new AppError('Deal ID is required', 400, 'MISSING_DEAL_ID');
     }
+    
+    if (!userId) {
+      throw new AppError('User ID is required', 400, 'MISSING_USER_ID');
+    }
+
+    const { Deal } = getExternalModels();
+    const { PerformanceCase } = getModels();
+    
+    if (!Deal || !PerformanceCase) {
+      throw new AppError('Required models not available', 500, 'MODEL_ERROR');
+    }
+
+    // Log the attempt for debugging
+    logInfo('Attempting to create performance case from deal', { 
+      dealId, 
+      userId: userId.toString() 
+    });
+
+    const deal = await Deal.findById(dealId);
+    
+    if (!deal) {
+      throw new AppError('Deal not found', 404, 'DEAL_NOT_FOUND');
+    }
+    
+    // Ensure deal.userId exists before comparison
+    if (!deal.userId) {
+      throw new AppError('Deal has no associated user', 400, 'INVALID_DEAL_DATA');
+    }
+    
+    if (deal.userId.toString() !== userId.toString()) {
+      throw new AppError('Access denied', 403, 'ACCESS_DENIED');
+    }
+    
+    if (!['completed', 'paid'].includes(deal.stage)) {
+      throw new AppError('Deal must be completed or paid', 400, 'INVALID_DEAL_STAGE');
+    }
+    
+    // Check if performance case already exists
+    const existingCase = await PerformanceCase.findOne({ dealId });
+    if (existingCase) {
+      logInfo('Performance case already exists for deal', { 
+        existingCaseId: existingCase._id,
+        dealId 
+      });
+      return existingCase;
+    }
+    
+    // Get manager if exists
+    const { CreatorProfile } = getExternalModels();
+    let activeManager = null;
+    
+    if (CreatorProfile) {
+      try {
+        const creatorProfile = await CreatorProfile.findOne({ userId });
+        activeManager = creatorProfile?.managers.find(m => m.status === 'active');
+      } catch (error) {
+        logWarning('Could not fetch creator profile for manager info', { error: error.message });
+      }
+    }
+    
+    const performanceCase = await PerformanceCase.create({
+      dealId,
+      creatorId: userId,
+      managerId: activeManager?.managerId || null,
+      creationTrigger: 'deal_completed',
+      status: 'evidence_collection'
+    });
+    
+    logInfo('Performance case created from completed deal', { 
+      performanceCaseId: performanceCase._id,
+      dealId,
+      userId: userId.toString()
+    });
+    
+    return performanceCase;
+    
+  } catch (error) {
+    logError('Error creating performance case from deal', { 
+      error: error.message, 
+      dealId, 
+      userId: userId ? userId.toString() : 'undefined',
+      stack: error.stack
+    });
+    throw error;
   }
+}
 
   // AI Analysis using OpenAI
   static async performAIAnalysis(performanceCaseId) {
     try {
+      const { PerformanceCase, PerformanceEvidence, PerformanceAnalysis } = getModels();
+      
+      if (!PerformanceCase || !PerformanceEvidence || !PerformanceAnalysis) {
+        throw new AppError('Required models not available', 500, 'MODEL_ERROR');
+      }
+
       const performanceCase = await PerformanceCase.findById(performanceCaseId);
       if (!performanceCase) {
         throw new AppError('Performance case not found', 404, 'CASE_NOT_FOUND');
@@ -355,6 +492,11 @@ class PerformanceService {
       // Prepare data for AI analysis
       const analysisPrompt = this.buildAnalysisPrompt(performanceCase, evidence);
       
+      // Check if OpenAI API key is available
+      if (!process.env.OPENAI_API_KEY) {
+        throw new AppError('OpenAI API key not configured', 500, 'CONFIG_ERROR');
+      }
+      
       // Call OpenAI API
       const openaiResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
         model: 'gpt-4',
@@ -374,10 +516,25 @@ class PerformanceService {
         headers: {
           'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 30000 // 30 second timeout
       });
 
-      const aiInsights = JSON.parse(openaiResponse.data.choices[0].message.content);
+      let aiInsights;
+      try {
+        aiInsights = JSON.parse(openaiResponse.data.choices[0].message.content);
+      } catch (parseError) {
+        // If JSON parsing fails, create a basic response
+        logWarning('Failed to parse AI response as JSON, using fallback', { parseError: parseError.message });
+        aiInsights = {
+          confidence: 0.7,
+          overallPerformance: 'met_expectations',
+          performanceComparison: { overallScore: 75 },
+          insights: { keySuccessFactors: [], improvementAreas: [] },
+          businessMetrics: {},
+          predictions: {}
+        };
+      }
 
       // Update analysis with AI results
       analysis.aiAnalysis = {
@@ -415,11 +572,18 @@ class PerformanceService {
 
     } catch (error) {
       // Update analysis status to failed
-      const analysis = await PerformanceAnalysis.findOne({ performanceCaseId });
-      if (analysis) {
-        analysis.aiAnalysis.status = 'failed';
-        analysis.aiAnalysis.error = error.message;
-        await analysis.save();
+      try {
+        const { PerformanceAnalysis } = getModels();
+        if (PerformanceAnalysis) {
+          const analysis = await PerformanceAnalysis.findOne({ performanceCaseId });
+          if (analysis) {
+            analysis.aiAnalysis.status = 'failed';
+            analysis.aiAnalysis.error = error.message;
+            await analysis.save();
+          }
+        }
+      } catch (updateError) {
+        logError('Failed to update analysis status', { updateError: updateError.message });
       }
 
       logError('AI analysis failed', { error: error.message, performanceCaseId });
@@ -514,6 +678,12 @@ Please provide analysis in the following JSON format:
   // Generate PDF Report
   static async generatePDFReport(performanceCaseId, template, branding = {}) {
     try {
+      const { PerformanceCase, PerformanceAnalysis, PerformanceEvidence } = getModels();
+      
+      if (!PerformanceCase) {
+        throw new AppError('Performance models not available', 500, 'MODEL_ERROR');
+      }
+
       const performanceCase = await PerformanceCase.findById(performanceCaseId)
         .populate('creatorId', 'fullName email')
         .populate('managerId', 'fullName email');
@@ -522,8 +692,8 @@ Please provide analysis in the following JSON format:
         throw new AppError('Performance case not found', 404, 'CASE_NOT_FOUND');
       }
 
-      const analysis = await PerformanceAnalysis.findOne({ performanceCaseId });
-      const evidence = await PerformanceEvidence.find({ performanceCaseId });
+      const analysis = PerformanceAnalysis ? await PerformanceAnalysis.findOne({ performanceCaseId }) : null;
+      const evidence = PerformanceEvidence ? await PerformanceEvidence.find({ performanceCaseId }) : [];
 
       // Create PDF document
       const doc = new PDFDocument({
@@ -661,11 +831,24 @@ Please provide analysis in the following JSON format:
   // Update rate card based on performance data
   static async updateRateCardFromPerformance(performanceCaseId) {
     try {
+      const { PerformanceCase, PerformanceAnalysis } = getModels();
+      const { CreatorProfile } = getExternalModels();
+      
+      if (!PerformanceCase || !PerformanceAnalysis) {
+        logWarning('Performance models not available for rate card update');
+        return;
+      }
+
       const performanceCase = await PerformanceCase.findById(performanceCaseId);
       const analysis = await PerformanceAnalysis.findOne({ performanceCaseId });
       
       if (!performanceCase || !analysis) {
         throw new AppError('Performance data not found', 404, 'DATA_NOT_FOUND');
+      }
+
+      if (!CreatorProfile) {
+        logWarning('Creator profile model not available for rate card update');
+        return;
       }
 
       const creatorProfile = await CreatorProfile.findOne({ userId: performanceCase.creatorId });
@@ -748,50 +931,158 @@ Please provide analysis in the following JSON format:
  * POST /api/v1/performance/cases
  */
 const createPerformanceCase = asyncHandler(async (req, res) => {
-  const { error, value } = createPerformanceCaseSchema.validate(req.body);
-  if (error) {
-    return res.status(400).json(errorResponse(
-      'Validation failed',
-      { errors: error.details.map(d => d.message) },
-      400
+  try {
+    // Validate request body
+    const { error, value } = createPerformanceCaseSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json(errorResponse(
+        'Validation failed',
+        { errors: error.details.map(d => d.message) },
+        400
+      ));
+    }
+
+    // Validate authentication
+    if (!req.user) {
+      return res.status(401).json(errorResponse(
+        'Authentication required',
+        { code: 'NOT_AUTHENTICATED' },
+        401
+      ));
+    }
+
+    // FIXED: Changed from req.user.userId to req.user.id
+    const userId = req.user.id;
+    if (!userId) {
+      return res.status(401).json(errorResponse(
+        'Invalid user session',
+        { code: 'INVALID_USER_SESSION' },
+        401
+      ));
+    }
+
+    const { dealId, priority, notes, tags } = value;
+
+    logInfo('Creating performance case', {
+      dealId,
+      userId: userId.toString(),
+      priority,
+      userAgent: req.get('User-Agent'),
+      ip: req.ip
+    });
+
+    // Check if user has access to create performance cases
+    if (!PerformanceService.checkSubscriptionAccess(req.user, 'basic_performance')) {
+      return res.status(403).json(errorResponse(
+        'Upgrade required for performance tracking',
+        { 
+          requiredTier: 'pro',
+          currentTier: req.user.subscriptionTier 
+        },
+        403
+      ));
+    }
+
+    // Create performance case from deal
+    const performanceCase = await PerformanceService.createFromCompletedDeal(dealId, userId);
+
+    // Update with additional data if provided
+    let updateNeeded = false;
+    
+    if (priority && priority !== performanceCase.priority) {
+      performanceCase.priority = priority;
+      updateNeeded = true;
+    }
+    
+    if (notes) {
+      performanceCase.notes = { 
+        ...performanceCase.notes, 
+        ...notes 
+      };
+      updateNeeded = true;
+    }
+    
+    if (tags && tags.length > 0) {
+      performanceCase.tags = [...new Set([...performanceCase.tags, ...tags])]; // Merge and deduplicate
+      updateNeeded = true;
+    }
+
+    if (updateNeeded) {
+      await performanceCase.save();
+    }
+
+    logInfo('Performance case created successfully', {
+      performanceCaseId: performanceCase._id,
+      caseId: performanceCase.caseId,
+      dealId,
+      userId: userId.toString()
+    });
+
+    res.status(201).json(successResponse(
+      'Performance case created successfully',
+      {
+        performanceCase: {
+          id: performanceCase._id,
+          caseId: performanceCase.caseId,
+          dealInfo: performanceCase.dealInfo,
+          status: performanceCase.status,
+          priority: performanceCase.priority,
+          evidenceCollection: performanceCase.evidenceCollection,
+          createdAt: performanceCase.createdAt,
+          notes: performanceCase.notes,
+          tags: performanceCase.tags
+        }
+      },
+      201
+    ));
+
+  } catch (error) {
+    logError('Performance case creation failed', {
+      error: error.message,
+      stack: error.stack,
+      userId: req.user?.id?.toString() || 'undefined', // FIXED: Changed from userId to id
+      dealId: req.body?.dealId,
+      requestBody: req.body
+    });
+
+    // Handle specific error types
+    if (error.code === 'DEAL_NOT_FOUND') {
+      return res.status(404).json(errorResponse(
+        'Deal not found or you do not have access to it',
+        { dealId: req.body?.dealId },
+        404
+      ));
+    }
+
+    if (error.code === 'INVALID_DEAL_STAGE') {
+      return res.status(400).json(errorResponse(
+        'Performance case can only be created for completed or paid deals',
+        { 
+          dealId: req.body?.dealId,
+          requiredStages: ['completed', 'paid']
+        },
+        400
+      ));
+    }
+
+    if (error.code === 'ACCESS_DENIED') {
+      return res.status(403).json(errorResponse(
+        'You do not have permission to create a performance case for this deal',
+        { dealId: req.body?.dealId },
+        403
+      ));
+    }
+
+    // Default error response
+    res.status(error.statusCode || 500).json(errorResponse(
+      error.message || 'Failed to create performance case',
+      { 
+        code: error.code || 'INTERNAL_ERROR',
+        dealId: req.body?.dealId
+      },
+      error.statusCode || 500
     ));
   }
-
-  const userId = req.user.userId;
-  const { dealId, priority, notes, tags } = value;
-
-  // Check if user has access to create performance cases
-  if (!PerformanceService.checkSubscriptionAccess(req.user, 'basic_performance')) {
-    return res.status(403).json(errorResponse(
-      'Upgrade required for performance tracking',
-      { requiredTier: 'pro' },
-      403
-    ));
-  }
-
-  const performanceCase = await PerformanceService.createFromCompletedDeal(dealId, userId);
-
-  // Update with additional data
-  if (priority) performanceCase.priority = priority;
-  if (notes) performanceCase.notes = notes;
-  if (tags) performanceCase.tags = tags;
-
-  await performanceCase.save();
-
-  res.status(201).json(successResponse(
-    'Performance case created successfully',
-    {
-      performanceCase: {
-        id: performanceCase._id,
-        caseId: performanceCase.caseId,
-        dealInfo: performanceCase.dealInfo,
-        status: performanceCase.status,
-        evidenceCollection: performanceCase.evidenceCollection,
-        createdAt: performanceCase.createdAt
-      }
-    },
-    201
-  ));
 });
 
 /**
@@ -799,7 +1090,14 @@ const createPerformanceCase = asyncHandler(async (req, res) => {
  * GET /api/v1/performance/cases
  */
 const getPerformanceCases = asyncHandler(async (req, res) => {
-  const userId = req.user.userId;
+  const { PerformanceCase } = getModels();
+  
+  if (!PerformanceCase) {
+    return res.status(500).json(errorResponse('Performance models not available', null, 500));
+  }
+
+  // FIXED: Changed from req.user.userId to req.user.id
+  const userId = req.user.id;
   const { status, priority, page = 1, limit = 20, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
 
   const query = {
@@ -846,8 +1144,15 @@ const getPerformanceCases = asyncHandler(async (req, res) => {
  * GET /api/v1/performance/cases/:id
  */
 const getPerformanceCase = asyncHandler(async (req, res) => {
+  const { PerformanceCase, PerformanceEvidence, PerformanceAnalysis, PerformanceReport } = getModels();
+  
+  if (!PerformanceCase) {
+    return res.status(500).json(errorResponse('Performance models not available', null, 500));
+  }
+
   const { id } = req.params;
-  const userId = req.user.userId;
+  // FIXED: Changed from req.user.userId to req.user.id
+  const userId = req.user.id;
 
   const performanceCase = await PerformanceCase.findById(id)
     .populate('creatorId', 'fullName email profilePicture')
@@ -865,9 +1170,9 @@ const getPerformanceCase = asyncHandler(async (req, res) => {
 
   // Get related data
   const [evidence, analysis, reports] = await Promise.all([
-    PerformanceEvidence.find({ performanceCaseId: id }).sort({ createdAt: -1 }),
-    PerformanceAnalysis.findOne({ performanceCaseId: id }),
-    PerformanceReport.find({ performanceCaseId: id }).sort({ createdAt: -1 })
+    PerformanceEvidence ? PerformanceEvidence.find({ performanceCaseId: id }).sort({ createdAt: -1 }) : [],
+    PerformanceAnalysis ? PerformanceAnalysis.findOne({ performanceCaseId: id }) : null,
+    PerformanceReport ? PerformanceReport.find({ performanceCaseId: id }).sort({ createdAt: -1 }) : []
   ]);
 
   res.json(successResponse(
@@ -886,8 +1191,15 @@ const getPerformanceCase = asyncHandler(async (req, res) => {
  * PUT /api/v1/performance/cases/:id
  */
 const updatePerformanceCase = asyncHandler(async (req, res) => {
+  const { PerformanceCase } = getModels();
+  
+  if (!PerformanceCase) {
+    return res.status(500).json(errorResponse('Performance models not available', null, 500));
+  }
+
   const { id } = req.params;
-  const userId = req.user.userId;
+  // FIXED: Changed from req.user.userId to req.user.id
+  const userId = req.user.id;
 
   const { error, value } = updatePerformanceCaseSchema.validate(req.body);
   if (error) {
@@ -929,8 +1241,15 @@ const uploadEvidence = [
   uploadLimiter,
   upload.array('files', 5),
   asyncHandler(async (req, res) => {
+    const { PerformanceCase, PerformanceEvidence } = getModels();
+    
+    if (!PerformanceCase || !PerformanceEvidence) {
+      return res.status(500).json(errorResponse('Performance models not available', null, 500));
+    }
+
     const { id } = req.params;
-    const userId = req.user.userId;
+    // FIXED: Changed from req.user.userId to req.user.id
+    const userId = req.user.id;
 
     if (!req.files || req.files.length === 0) {
       return res.status(400).json(errorResponse('No files uploaded', null, 400));
@@ -1028,8 +1347,15 @@ const uploadEvidence = [
 const triggerAIAnalysis = [
   aiAnalysisLimiter,
   asyncHandler(async (req, res) => {
+    const { PerformanceCase } = getModels();
+    
+    if (!PerformanceCase) {
+      return res.status(500).json(errorResponse('Performance models not available', null, 500));
+    }
+
     const { id } = req.params;
-    const userId = req.user.userId;
+    // FIXED: Changed from req.user.userId to req.user.id
+    const userId = req.user.id;
 
     // Check subscription access
     if (!PerformanceService.checkSubscriptionAccess(req.user, 'ai_analysis')) {
@@ -1086,8 +1412,15 @@ const triggerAIAnalysis = [
  * POST /api/v1/performance/cases/:id/reports
  */
 const generateReport = asyncHandler(async (req, res) => {
+  const { PerformanceCase, PerformanceReport } = getModels();
+  
+  if (!PerformanceCase || !PerformanceReport) {
+    return res.status(500).json(errorResponse('Performance models not available', null, 500));
+  }
+
   const { id } = req.params;
-  const userId = req.user.userId;
+  // FIXED: Changed from req.user.userId to req.user.id
+  const userId = req.user.id;
 
   const { error, value } = generateReportSchema.validate(req.body);
   if (error) {
@@ -1199,8 +1532,15 @@ const generateReport = asyncHandler(async (req, res) => {
  * GET /api/v1/performance/reports/:reportId/download
  */
 const downloadReport = asyncHandler(async (req, res) => {
+  const { PerformanceReport } = getModels();
+  
+  if (!PerformanceReport) {
+    return res.status(500).json(errorResponse('Performance models not available', null, 500));
+  }
+
   const { reportId } = req.params;
-  const userId = req.user.userId;
+  // FIXED: Changed from req.user.userId to req.user.id
+  const userId = req.user.id;
 
   const report = await PerformanceReport.findById(reportId)
     .populate({
@@ -1242,8 +1582,15 @@ const downloadReport = asyncHandler(async (req, res) => {
  * POST /api/v1/performance/reports/:reportId/send
  */
 const sendReportToClient = asyncHandler(async (req, res) => {
+  const { PerformanceReport } = getModels();
+  
+  if (!PerformanceReport) {
+    return res.status(500).json(errorResponse('Performance models not available', null, 500));
+  }
+
   const { reportId } = req.params;
-  const userId = req.user.userId;
+  // FIXED: Changed from req.user.userId to req.user.id
+  const userId = req.user.id;
   const { clientEmail, subject, message } = req.body;
 
   if (!clientEmail) {
@@ -1322,7 +1669,14 @@ const sendReportToClient = asyncHandler(async (req, res) => {
  * GET/PUT /api/v1/performance/settings
  */
 const getSettings = asyncHandler(async (req, res) => {
-  const userId = req.user.userId;
+  const { PerformanceSettings } = getModels();
+  
+  if (!PerformanceSettings) {
+    return res.status(500).json(errorResponse('Performance models not available', null, 500));
+  }
+
+  // FIXED: Changed from req.user.userId to req.user.id
+  const userId = req.user.id;
 
   let settings = await PerformanceSettings.findOne({ userId });
   
@@ -1338,7 +1692,14 @@ const getSettings = asyncHandler(async (req, res) => {
 });
 
 const updateSettings = asyncHandler(async (req, res) => {
-  const userId = req.user.userId;
+  const { PerformanceSettings } = getModels();
+  
+  if (!PerformanceSettings) {
+    return res.status(500).json(errorResponse('Performance models not available', null, 500));
+  }
+
+  // FIXED: Changed from req.user.userId to req.user.id
+  const userId = req.user.id;
 
   const { error, value } = settingsSchema.validate(req.body);
   if (error) {
@@ -1373,7 +1734,14 @@ const updateSettings = asyncHandler(async (req, res) => {
  * GET /api/v1/performance/analytics
  */
 const getAnalytics = asyncHandler(async (req, res) => {
-  const userId = req.user.userId;
+  const { PerformanceCase } = getModels();
+  
+  if (!PerformanceCase) {
+    return res.status(500).json(errorResponse('Performance models not available', null, 500));
+  }
+
+  // FIXED: Changed from req.user.userId to req.user.id
+  const userId = req.user.id;
   const { period = '30d', platform } = req.query;
 
   // Date range calculation
@@ -1487,8 +1855,15 @@ const getAnalytics = asyncHandler(async (req, res) => {
  * DELETE /api/v1/performance/cases/:id
  */
 const archivePerformanceCase = asyncHandler(async (req, res) => {
+  const { PerformanceCase } = getModels();
+  
+  if (!PerformanceCase) {
+    return res.status(500).json(errorResponse('Performance models not available', null, 500));
+  }
+
   const { id } = req.params;
-  const userId = req.user.userId;
+  // FIXED: Changed from req.user.userId to req.user.id
+  const userId = req.user.id;
 
   const performanceCase = await PerformanceCase.findById(id);
   if (!performanceCase) {

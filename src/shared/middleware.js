@@ -3,7 +3,7 @@
 /**
  * CreatorsMantra Backend - Essential Middleware
  * Minimal middleware functions for core functionality
- * 
+ * src/shared/middleware.js
  * @author CreatorsMantra Team
  * @version 1.0.0
  */

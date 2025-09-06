@@ -62,7 +62,7 @@ const upload = multer({
  */
 const uploadContract = asyncHandler(async (req, res) => {
   try {
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
     const { brandName, brandEmail, contractValue, notes, tags, platforms } = req.body;
 
     logInfo('Contract upload initiated', { 
@@ -115,11 +115,11 @@ const uploadContract = asyncHandler(async (req, res) => {
       agency_pro: -1
     };
 
-    const userLimit = subscriptionLimits[creator.subscription?.tier] || 5;
+    const userLimit = subscriptionLimits[creator.subscriptionTier] || 5;
     if (userLimit !== -1 && existingContracts >= userLimit) {
       return res.status(403).json({
         success: false,
-        message: `Contract limit reached for ${creator.subscription?.tier} plan. Upgrade to upload more contracts.`,
+        message: `Contract limit reached for ${creator.subscriptionTier} plan. Upgrade to upload more contracts.`,
         code: 403,
         timestamp: new Date().toISOString()
       });
@@ -152,7 +152,7 @@ const uploadContract = asyncHandler(async (req, res) => {
     const contract = await contractService.createContract(contractData, creatorId);
 
     // Start background analysis for Pro+ users
-    if (['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscription?.tier)) {
+    if (['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscriptionTier)) {
       // Trigger analysis asynchronously
       setImmediate(async () => {
         try {
@@ -180,7 +180,7 @@ const uploadContract = asyncHandler(async (req, res) => {
           platforms: contract.platforms,
           contractValue: contract.contractValue,
           createdAt: contract.createdAt,
-          hasAIAnalysis: ['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscription?.tier)
+          hasAIAnalysis: ['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscriptionTier)
         }
       }
     ));
@@ -188,7 +188,7 @@ const uploadContract = asyncHandler(async (req, res) => {
   } catch (error) {
     logError('Contract upload failed', { 
       error: error.message,
-      creatorId: req.user?.userId 
+      creatorId: req.user?.id 
     });
     throw error;
   }
@@ -202,20 +202,29 @@ const uploadContract = asyncHandler(async (req, res) => {
 const analyzeContract = asyncHandler(async (req, res) => {
   try {
     const { contractId } = req.params;
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
 
     logInfo('Manual contract analysis triggered', { contractId, creatorId });
 
-    // Check subscription tier for AI features
-    const creator = await User.findById(creatorId);
-    if (!['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscription?.tier)) {
-      return res.status(403).json({
-        success: false,
-        message: 'AI contract analysis requires Pro subscription or higher',
-        code: 403,
-        timestamp: new Date().toISOString()
-      });
-    }
+       // Check subscription tier for AI features
+       const creator = await User.findById(creatorId);
+    
+       // DEBUG: Log the actual user data
+       console.log('DEBUG - Full creator object:', JSON.stringify(creator, null, 2));
+       console.log('DEBUG - creator.subscriptionTier:', creator.subscriptionTier);
+       console.log('DEBUG - creator.subscription?.tier:', creator.subscription?.tier);
+       
+       if (!['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscriptionTier)) {
+         console.log('DEBUG - Subscription check failed');
+         return res.status(403).json({
+           success: false,
+           message: 'AI contract analysis requires Pro subscription or higher',
+           code: 403,
+           timestamp: new Date().toISOString()
+         });
+       }
+       
+       console.log('DEBUG - Subscription check passed');
 
     // Verify contract ownership
     const contract = await Contract.findOne({ 
@@ -294,7 +303,7 @@ const analyzeContract = asyncHandler(async (req, res) => {
 const getContract = asyncHandler(async (req, res) => {
   try {
     const { contractId } = req.params;
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
 
     logInfo('Contract retrieval requested', { contractId, creatorId });
 
@@ -358,7 +367,7 @@ const getContract = asyncHandler(async (req, res) => {
  */
 const listContracts = asyncHandler(async (req, res) => {
   try {
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
     const { 
       status, 
       brandName, 
@@ -425,7 +434,7 @@ const listContracts = asyncHandler(async (req, res) => {
   } catch (error) {
     logError('Contract list failed', { 
       error: error.message,
-      creatorId: req.user?.userId 
+      creatorId: req.user?.id 
     });
     throw error;
   }
@@ -443,13 +452,13 @@ const listContracts = asyncHandler(async (req, res) => {
 const getNegotiationPoints = asyncHandler(async (req, res) => {
   try {
     const { contractId } = req.params;
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
 
     logInfo('Negotiation points requested', { contractId, creatorId });
 
     // Check subscription tier
     const creator = await User.findById(creatorId);
-    if (!['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscription?.tier)) {
+    if (!['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscriptionTier)) {
       return res.status(403).json({
         success: false,
         message: 'Negotiation assistance requires Pro subscription or higher',
@@ -504,7 +513,7 @@ const getNegotiationPoints = asyncHandler(async (req, res) => {
 const generateNegotiationEmail = asyncHandler(async (req, res) => {
   try {
     const { contractId } = req.params;
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
     const { negotiationPoints, tone = 'professional' } = req.body;
 
     logInfo('Negotiation email generation requested', { 
@@ -516,7 +525,7 @@ const generateNegotiationEmail = asyncHandler(async (req, res) => {
 
     // Check subscription tier
     const creator = await User.findById(creatorId);
-    if (!['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscription?.tier)) {
+    if (!['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscriptionTier)) {
       return res.status(403).json({
         success: false,
         message: 'Email generation requires Pro subscription or higher',
@@ -580,7 +589,7 @@ const generateNegotiationEmail = asyncHandler(async (req, res) => {
 const saveNegotiation = asyncHandler(async (req, res) => {
   try {
     const { contractId } = req.params;
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
     const { negotiationPoints, emailTemplate, emailSent = false } = req.body;
 
     logInfo('Saving negotiation history', { 
@@ -649,7 +658,7 @@ const saveNegotiation = asyncHandler(async (req, res) => {
 const getNegotiationHistory = asyncHandler(async (req, res) => {
   try {
     const { contractId } = req.params;
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
 
     logInfo('Negotiation history requested', { contractId, creatorId });
 
@@ -717,7 +726,7 @@ const getNegotiationHistory = asyncHandler(async (req, res) => {
 const getTemplates = asyncHandler(async (req, res) => {
   try {
     const { category, platforms } = req.query;
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
 
     logInfo('Contract templates requested', { 
       creatorId, 
@@ -762,7 +771,7 @@ const getTemplates = asyncHandler(async (req, res) => {
   } catch (error) {
     logError('Get contract templates failed', { 
       error: error.message,
-      creatorId: req.user?.userId 
+      creatorId: req.user?.id 
     });
     throw error;
   }
@@ -776,7 +785,7 @@ const getTemplates = asyncHandler(async (req, res) => {
 const getClauseAlternatives = asyncHandler(async (req, res) => {
   try {
     const { clauseType } = req.params;
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
     const { context } = req.query;
 
     logInfo('Clause alternatives requested', { 
@@ -787,7 +796,7 @@ const getClauseAlternatives = asyncHandler(async (req, res) => {
 
     // Check subscription tier
     const creator = await User.findById(creatorId);
-    if (!['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscription?.tier)) {
+    if (!['pro', 'elite', 'agency_starter', 'agency_pro'].includes(creator.subscriptionTier)) {
       return res.status(403).json({
         success: false,
         message: 'Clause alternatives require Pro subscription or higher',
@@ -842,7 +851,7 @@ const getClauseAlternatives = asyncHandler(async (req, res) => {
  */
 const getAnalytics = asyncHandler(async (req, res) => {
   try {
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
 
     logInfo('Contract analytics requested', { creatorId });
 
@@ -856,7 +865,7 @@ const getAnalytics = asyncHandler(async (req, res) => {
   } catch (error) {
     logError('Get contract analytics failed', { 
       error: error.message,
-      creatorId: req.user?.userId 
+      creatorId: req.user?.id 
     });
     throw error;
   }
@@ -867,22 +876,64 @@ const getAnalytics = asyncHandler(async (req, res) => {
 // ================================
 
 /**
- * Convert contract to deal
+ * Convert analyzed contract to deal in CRM pipeline
  * POST /api/contracts/:contractId/convert-to-deal
- * Subscription: All tiers
+ * 
+ * Access: All subscription tiers
+ * Prerequisite: Contract should be analyzed for best results
+ * 
+ * Path Params:
+ * - contractId: MongoDB ObjectId of the contract
+ * 
+ * Body Fields (all optional - will extract from analysis if available):
+ * - title: Custom deal title
+ * - dealValue: Override deal value (number in INR)
+ * - currency: Currency code (INR, USD, EUR)
+ * - platform: Primary platform (instagram, youtube, tiktok, etc.)
+ * - status: Deal status (potential, pitched, negotiating, etc.)
+ * - dealType: Type of deal (collaboration, sponsorship, etc.)
+ * - timeline: { startDate, endDate }
+ * - deliverables: Array of deliverable objects
+ * - notes: Additional notes
+ * - brandContactPerson: Brand contact name
+ * - brandContactRole: Brand contact role
+ * - brandContactEmail: Brand contact email
+ * - brandWebsite: Brand website URL
+ * - brandCompanySize: Company size (small, medium, large)
+ * - priority: Deal priority (low, medium, high)
+ * - stage: Deal stage (negotiation, proposal, etc.)
+ * 
+ * Response: Created deal object with contract linkage
+ * Integration: Seamless workflow from contract analysis to deal management
  */
 const convertToDeal = asyncHandler(async (req, res) => {
   try {
     const { contractId } = req.params;
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
     const dealData = req.body;
 
     logInfo('Contract to deal conversion requested', { 
       contractId, 
-      creatorId 
+      creatorId,
+      hasCustomData: Object.keys(dealData).length > 0,
+      customFields: Object.keys(dealData)
     });
 
-    // Validate contract ownership
+    // ================================
+    // INPUT VALIDATION
+    // ================================
+
+    // Validate contractId format
+    if (!contractId || !contractId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid contract ID format',
+        code: 400,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Validate contract ownership and existence
     const contract = await Contract.findOne({ 
       _id: contractId, 
       creatorId,
@@ -898,41 +949,400 @@ const convertToDeal = asyncHandler(async (req, res) => {
       });
     }
 
-    // Check if already converted
+    // Check if already converted to deal
     if (contract.dealId) {
+      try {
+        const existingDeal = await require('../deals/model').Deal.findById(contract.dealId);
+        if (existingDeal && existingDeal.isActive !== false) {
+          return res.status(409).json({
+            success: false,
+            message: 'Contract already converted to deal',
+            code: 409,
+            data: {
+              existingDeal: {
+                id: existingDeal._id,
+                title: existingDeal.title,
+                status: existingDeal.status,
+                dealValue: existingDeal.dealValue,
+                createdAt: existingDeal.createdAt
+              }
+            },
+            timestamp: new Date().toISOString()
+          });
+        }
+      } catch (dealCheckError) {
+        logWarn('Could not verify existing deal, proceeding with conversion', { 
+          contractId, 
+          error: dealCheckError.message 
+        });
+      }
+    }
+
+    // ================================
+    // DEAL DATA VALIDATION
+    // ================================
+
+    // Validate dealValue if provided
+    if (dealData.dealValue !== undefined) {
+      if (typeof dealData.dealValue !== 'number' || dealData.dealValue < 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'dealValue must be a positive number (amount in INR)',
+          code: 400,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      if (dealData.dealValue > 100000000) { // 10 Crore limit
+        return res.status(400).json({
+          success: false,
+          message: 'dealValue cannot exceed ₹10 Crore',
+          code: 400,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // Validate currency if provided
+    if (dealData.currency && !['INR', 'USD', 'EUR'].includes(dealData.currency)) {
       return res.status(400).json({
         success: false,
-        message: 'Contract already converted to deal',
+        message: 'Invalid currency. Supported: INR, USD, EUR',
         code: 400,
         timestamp: new Date().toISOString()
       });
     }
 
-    const deal = await contractService.convertContractToDeal(contractId, dealData);
+    // Validate platform if provided
+    if (dealData.platform) {
+      const validPlatforms = [
+        'instagram', 'youtube', 'tiktok', 'linkedin', 'twitter', 
+        'facebook', 'snapchat', 'pinterest', 'twitch', 'other'
+      ];
+      if (!validPlatforms.includes(dealData.platform)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid platform: ${dealData.platform}. Valid platforms: ${validPlatforms.join(', ')}`,
+          code: 400,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
 
-    res.json(successResponse(
-      'Contract converted to deal successfully',
-      {
-        contract: {
-          id: contract._id,
-          dealId: deal._id
-        },
-        deal: {
-          id: deal._id,
-          brandName: deal.brandName,
-          dealValue: deal.dealValue,
-          status: deal.status,
-          createdAt: deal.createdAt
+    // Validate status if provided
+    if (dealData.status) {
+      const validStatuses = [
+        'potential', 'pitched', 'negotiating', 'confirmed', 
+        'in_progress', 'delivered', 'completed', 'cancelled', 'rejected'
+      ];
+      if (!validStatuses.includes(dealData.status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status: ${dealData.status}. Valid statuses: ${validStatuses.join(', ')}`,
+          code: 400,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // Validate dealType if provided
+    if (dealData.dealType) {
+      const validDealTypes = [
+        'collaboration', 'sponsorship', 'partnership', 'affiliate', 
+        'licensing', 'consultation', 'event', 'other'
+      ];
+      if (!validDealTypes.includes(dealData.dealType)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid dealType: ${dealData.dealType}. Valid types: ${validDealTypes.join(', ')}`,
+          code: 400,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // Validate priority if provided
+    if (dealData.priority && !['low', 'medium', 'high'].includes(dealData.priority)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid priority. Valid values: low, medium, high',
+        code: 400,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Validate timeline if provided
+    if (dealData.timeline) {
+      if (dealData.timeline.startDate && dealData.timeline.endDate) {
+        const startDate = new Date(dealData.timeline.startDate);
+        const endDate = new Date(dealData.timeline.endDate);
+        
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid date format in timeline',
+            code: 400,
+            timestamp: new Date().toISOString()
+          });
+        }
+
+        if (endDate <= startDate) {
+          return res.status(400).json({
+            success: false,
+            message: 'End date must be after start date',
+            code: 400,
+            timestamp: new Date().toISOString()
+          });
         }
       }
+    }
+
+    // Validate deliverables if provided
+    if (dealData.deliverables) {
+      if (!Array.isArray(dealData.deliverables)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Deliverables must be an array',
+          code: 400,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const validDeliverableTypes = [
+        'instagram_post', 'instagram_story', 'instagram_reel', 'instagram_live',
+        'youtube_video', 'youtube_shorts', 'youtube_live',
+        'tiktok_video', 'tiktok_live',
+        'linkedin_post', 'linkedin_article', 'linkedin_video',
+        'twitter_post', 'twitter_thread', 'twitter_space',
+        'facebook_post', 'facebook_story', 'facebook_reel', 'facebook_live',
+        'snapchat_story', 'snapchat_spotlight',
+        'blog_post', 'article', 'newsletter',
+        'podcast', 'webinar', 'live_stream', 'other'
+      ];
+
+      for (const [index, deliverable] of dealData.deliverables.entries()) {
+        if (!deliverable.type || !validDeliverableTypes.includes(deliverable.type)) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid deliverable type at index ${index}: ${deliverable.type}. Valid types: ${validDeliverableTypes.join(', ')}`,
+            code: 400,
+            timestamp: new Date().toISOString()
+          });
+        }
+
+        if (deliverable.quantity && (typeof deliverable.quantity !== 'number' || deliverable.quantity < 1 || deliverable.quantity > 100)) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid quantity at deliverable index ${index}. Must be between 1 and 100`,
+            code: 400,
+            timestamp: new Date().toISOString()
+          });
+        }
+
+        if (deliverable.description && typeof deliverable.description !== 'string') {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid description at deliverable index ${index}. Must be a string`,
+            code: 400,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
+
+      if (dealData.deliverables.length > 50) {
+        return res.status(400).json({
+          success: false,
+          message: 'Maximum 50 deliverables allowed per deal',
+          code: 400,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // Validate string fields length
+    const stringFields = {
+      title: { max: 200, field: 'title' },
+      notes: { max: 2000, field: 'notes' },
+      brandContactPerson: { max: 100, field: 'brandContactPerson' },
+      brandContactRole: { max: 100, field: 'brandContactRole' },
+      brandContactEmail: { max: 100, field: 'brandContactEmail' },
+      brandWebsite: { max: 200, field: 'brandWebsite' }
+    };
+
+    for (const [field, config] of Object.entries(stringFields)) {
+      if (dealData[field] && typeof dealData[field] === 'string' && dealData[field].length > config.max) {
+        return res.status(400).json({
+          success: false,
+          message: `${config.field} cannot exceed ${config.max} characters`,
+          code: 400,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // Validate email format if provided
+    if (dealData.brandContactEmail) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(dealData.brandContactEmail)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid email format for brandContactEmail',
+          code: 400,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // ================================
+    // CONVERSION PROCESS
+    // ================================
+
+    logInfo('Starting contract to deal conversion', { 
+      contractId,
+      contractTitle: contract.title,
+      brandName: contract.brandName,
+      hasAnalysis: !!contract.analysisId
+    });
+
+    // Call the service function to perform the conversion
+    const deal = await contractService.convertContractToDeal(contractId, dealData);
+
+    // ================================
+    // SUCCESS RESPONSE
+    // ================================
+
+    const responseData = {
+      contract: {
+        id: contract._id,
+        title: contract.title,
+        brandName: contract.brandName,
+        status: contract.status,
+        platforms: contract.platforms,
+        contractValue: contract.contractValue,
+        dealId: deal._id,
+        updatedAt: contract.updatedAt
+      },
+      deal: {
+        id: deal._id,
+        title: deal.title,
+        brandName: deal.brand.name,
+        dealValue: {
+          amount: deal.dealValue.amount,
+          currency: deal.dealValue.currency,
+          formatted: new Intl.NumberFormat('en-IN', {
+            style: 'currency',
+            currency: deal.dealValue.currency,
+            minimumFractionDigits: 0
+          }).format(deal.dealValue.amount)
+        },
+        platform: deal.platform,
+        platforms: deal.platforms,
+        status: deal.status,
+        dealType: deal.dealType,
+        priority: deal.priority,
+        stage: deal.stage,
+        deliverables: deal.deliverables?.map(d => ({
+          type: d.type,
+          quantity: d.quantity,
+          description: d.description,
+          status: d.status,
+          platform: d.platform,
+          deadline: d.deadline
+        })) || [],
+        timeline: deal.timeline,
+        paymentTerms: deal.paymentTerms,
+        notes: deal.notes,
+        createdAt: deal.createdAt,
+        createdFrom: deal.createdFrom
+      },
+      conversion: {
+        convertedAt: new Date().toISOString(),
+        extractedFromAnalysis: !!contract.analysisId,
+        customDataProvided: Object.keys(dealData).length > 0
+      }
+    };
+
+    logInfo('Contract to deal conversion completed successfully', { 
+      contractId: deal.contractId,
+      dealId: deal._id,
+      dealTitle: deal.title,
+      dealValue: deal.dealValue,
+      deliverableCount: deal.deliverables?.length || 0
+    });
+
+    res.status(201).json(successResponse(
+      'Contract converted to deal successfully',
+      responseData,
+      201
     ));
 
   } catch (error) {
     logError('Contract to deal conversion failed', { 
       error: error.message,
-      contractId: req.params.contractId 
+      contractId: req.params.contractId,
+      creatorId: req.user?.id,
+      stack: error.stack,
+      dealData: req.body
     });
-    throw error;
+
+    // ================================
+    // ERROR HANDLING
+    // ================================
+
+    // Handle specific error types
+    if (error.message.includes('validation failed') || error.message.includes('ValidationError')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Deal validation failed. Please check your input data.',
+        details: error.message,
+        code: 400,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (error.message.includes('Contract not found')) {
+      return res.status(404).json({
+        success: false,
+        message: 'Contract not found or access denied',
+        code: 404,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (error.message.includes('Creator not found')) {
+      return res.status(404).json({
+        success: false,
+        message: 'Creator profile not found',
+        code: 404,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (error.message.includes('duplicate key') || error.message.includes('E11000')) {
+      return res.status(409).json({
+        success: false,
+        message: 'A deal with similar details already exists',
+        code: 409,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (error.message.includes('Cast to ObjectId failed')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid ID format provided',
+        code: 400,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Default error response
+    res.status(500).json({
+      success: false,
+      message: 'An unexpected error occurred during contract conversion',
+      code: 500,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
@@ -948,7 +1358,7 @@ const convertToDeal = asyncHandler(async (req, res) => {
 const updateContractStatus = asyncHandler(async (req, res) => {
   try {
     const { contractId } = req.params;
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
     const { status, notes } = req.body;
 
     logInfo('Contract status update requested', { 
@@ -1023,7 +1433,7 @@ const updateContractStatus = asyncHandler(async (req, res) => {
 const deleteContract = asyncHandler(async (req, res) => {
   try {
     const { contractId } = req.params;
-    const { userId: creatorId } = req.user;
+    const { id: creatorId } = req.user;
 
     logInfo('Contract deletion requested', { contractId, creatorId });
 

@@ -1244,7 +1244,7 @@ try {
 
 // Performance vault routes - FULL PRODUCTION IMPLEMENTATION
 try {
-  const performanceRoutes = require('./modules/performance/routes');
+  const performanceRoutes = require('./modules/performance(not used)/routes');
   app.use(`${API_PREFIX}/performance`, performanceRoutes);
   logInfo('✅ Performance routes loaded successfully');
   logInfo('📊 Performance features enabled: Evidence Collection, AI Analysis, PDF Reports, Client Communication, Public Portfolio, Performance Analytics');
@@ -3397,7 +3397,7 @@ const initializePerformanceServices = async () => {
         try {
           logInfo('🤖 Updating AI performance analysis statuses...');
           
-          const { PerformanceAnalysis } = require('./modules/performance/model');
+          const { PerformanceAnalysis } = require('./modules/performance(not used)/model');
           
           // Reset stuck processing analyses (processing for more than 2 hours)
           const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
@@ -3431,7 +3431,7 @@ const initializePerformanceServices = async () => {
       try {
         logInfo('📊 Updating performance analytics...');
         
-        const { PerformanceCase } = require('./modules/performance/model');
+        const { PerformanceCase } = require('./modules/performance(not used)/model');
         
         // Update performance cases with completed evidence collection
         const casesToUpdate = await PerformanceCase.find({
@@ -3460,7 +3460,7 @@ const initializePerformanceServices = async () => {
       try {
         logInfo('🎯 Updating performance portfolios...');
         
-        const { PerformancePortfolio, PerformanceCase } = require('./modules/performance/model');
+        const { PerformancePortfolio, PerformanceCase } = require('./modules/performance(not used)/model');
         
         // Update portfolio statistics
         const portfolios = await PerformancePortfolio.find({
@@ -3500,8 +3500,8 @@ const initializePerformanceServices = async () => {
         try {
           logInfo('💰 Processing rate card optimization from performance data...');
           
-          const { PerformanceService } = require('./modules/performance/controller');
-          const { PerformanceCase } = require('./modules/performance/model');
+          const { PerformanceService } = require('./modules/performance(not used)/controller');
+          const { PerformanceCase } = require('./modules/performance(not used)/model');
           
           // Find cases with analysis ready for rate card optimization
           const casesForOptimization = await PerformanceCase.find({
@@ -3542,7 +3542,7 @@ const initializePerformanceServices = async () => {
         try {
           logInfo('📧 Processing performance report delivery reminders...');
           
-          const { PerformanceCase } = require('./modules/performance/model');
+          const { PerformanceCase } = require('./modules/performance(not used)/model');
           
           // Find cases with reports generated but not sent to clients (older than 3 days)
           const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);

@@ -16,7 +16,7 @@ const OpenAI = require('openai');
 // External module models for cross-module analytics
 const { Deal } = require('../deals/model');
 const { Invoice } = require('../invoices/model');
-const { Campaign } = require('../performance/model');
+const { Campaign } = require('../performance(not used)/model');
 const { Contract } = require('../contracts/model');
 const { Brief } = require('../briefs(not used)/model');
 const { RateCard } = require('../ratecards/model');

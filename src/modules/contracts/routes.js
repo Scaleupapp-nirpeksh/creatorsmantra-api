@@ -35,173 +35,7 @@ router.use((req, res, next) => {
 });
 
 // ================================
-// CONTRACT UPLOAD & CREATION ROUTES
-// ================================
-
-/**
- * Upload new contract file with metadata
- * POST /api/contracts/upload
- * 
- * Access: All subscription tiers
- * File: Single contract file (PDF, DOC, DOCX, JPG, PNG)
- * Size Limit: 25MB
- * 
- * Body Fields:
- * - brandName (required): Brand/company name
- * - brandEmail (optional): Brand contact email
- * - contractValue (optional): Contract value in INR
- * - platforms (optional): Array or comma-separated platforms
- * - tags (optional): Array or comma-separated tags
- * - notes (optional): Additional notes
- * 
- * Response: Contract object with upload confirmation
- * Background: AI analysis starts automatically for Pro+ users
- */
-router.post('/upload',
-  contractController.upload, // Multer file upload middleware
-  contractController.uploadContract
-);
-
-/**
- * Trigger manual AI analysis for uploaded contract
- * POST /api/contracts/:contractId/analyze
- * 
- * Access: Pro, Elite, Agency plans only
- * 
- * Path Params:
- * - contractId: MongoDB ObjectId of the contract
- * 
- * Response: AI analysis results with risk assessment
- * Processing: Full OpenAI GPT-4 contract analysis
- */
-router.post('/:contractId/analyze',
-  authorizeSubscription(['pro', 'elite', 'agency_starter', 'agency_pro']),
-  contractController.analyzeContract
-);
-
-// ================================
-// CONTRACT RETRIEVAL ROUTES
-// ================================
-
-/**
- * Get single contract with full analysis details
- * GET /api/contracts/:contractId
- * 
- * Access: All subscription tiers (own contracts only)
- * 
- * Path Params:
- * - contractId: MongoDB ObjectId of the contract
- * 
- * Response: Complete contract data with AI analysis if available
- * Authorization: Creator ownership verification
- */
-router.get('/:contractId',
-  contractController.getContract
-);
-
-/**
- * List creator's contracts with filtering and pagination
- * GET /api/contracts
- * 
- * Access: All subscription tiers
- * 
- * Query Params:
- * - status (optional): Filter by contract status
- * - brandName (optional): Filter by brand name (partial match)
- * - riskLevel (optional): Filter by AI risk level
- * - limit (optional): Results per page (default: 50, max: 100)
- * - page (optional): Page number (default: 1)
- * - sortBy (optional): Sort field (default: createdAt)
- * - sortOrder (optional): asc/desc (default: desc)
- * 
- * Response: Paginated contract list with summary data
- */
-router.get('/',
-  contractController.listContracts
-);
-
-// ================================
-// AI-POWERED NEGOTIATION ROUTES
-// ================================
-
-/**
- * Generate AI-powered negotiation points for contract
- * GET /api/contracts/:contractId/negotiation-points
- * 
- * Access: Pro, Elite, Agency plans only
- * Prerequisite: Contract must be analyzed first
- * 
- * Path Params:
- * - contractId: MongoDB ObjectId of the contract
- * 
- * Response: Prioritized list of negotiation points with recommendations
- * AI Logic: Identifies risky clauses and suggests creator-friendly alternatives
- */
-router.get('/:contractId/negotiation-points',
-  authorizeSubscription(['pro', 'elite', 'agency_starter', 'agency_pro']),
-  contractController.getNegotiationPoints
-);
-
-/**
- * Generate professional negotiation email template
- * POST /api/contracts/:contractId/negotiation-email
- * 
- * Access: Pro, Elite, Agency plans only
- * 
- * Path Params:
- * - contractId: MongoDB ObjectId of the contract
- * 
- * Body Fields:
- * - negotiationPoints (required): Array of points to negotiate
- * - tone (optional): 'professional', 'friendly', or 'assertive' (default: professional)
- * 
- * Response: Ready-to-send email template with subject and body
- * AI Logic: Crafts persuasive, professional negotiation emails
- */
-router.post('/:contractId/negotiation-email',
-  authorizeSubscription(['pro', 'elite', 'agency_starter', 'agency_pro']),
-  contractController.generateNegotiationEmail
-);
-
-/**
- * Save negotiation attempt and email template
- * POST /api/contracts/:contractId/negotiations
- * 
- * Access: All subscription tiers
- * 
- * Path Params:
- * - contractId: MongoDB ObjectId of the contract
- * 
- * Body Fields:
- * - negotiationPoints (required): Points being negotiated
- * - emailTemplate (required): Generated email template
- * - emailSent (optional): Whether email was sent (default: false)
- * 
- * Response: Saved negotiation record with round number
- * Tracking: Maintains complete negotiation history
- */
-router.post('/:contractId/negotiations',
-  contractController.saveNegotiation
-);
-
-/**
- * Get complete negotiation history for contract
- * GET /api/contracts/:contractId/negotiations
- * 
- * Access: All subscription tiers (own contracts only)
- * 
- * Path Params:
- * - contractId: MongoDB ObjectId of the contract
- * 
- * Response: Chronological list of all negotiation rounds
- * Data: Email templates, brand responses, outcomes
- */
-router.get('/:contractId/negotiations',
-  contractController.getNegotiationHistory
-);
-
-// ================================
-// TEMPLATE & KNOWLEDGE BASE ROUTES
+// SPECIFIC ROUTES (MUST COME FIRST!)
 // ================================
 
 /**
@@ -241,10 +75,6 @@ router.get('/clause-alternatives/:clauseType',
   contractController.getClauseAlternatives
 );
 
-// ================================
-// ANALYTICS & INSIGHTS ROUTES
-// ================================
-
 /**
  * Get comprehensive contract analytics for creator
  * GET /api/contracts/analytics
@@ -261,148 +91,6 @@ router.get('/clause-alternatives/:clauseType',
 router.get('/analytics',
   contractController.getAnalytics
 );
-
-// ================================
-// INTEGRATION & WORKFLOW ROUTES
-// ================================
-
-/**
- * Convert analyzed contract to deal in CRM pipeline
- * POST /api/contracts/:contractId/convert-to-deal
- * 
- * Access: All subscription tiers
- * Prerequisite: Contract should be analyzed for best results
- * 
- * Path Params:
- * - contractId: MongoDB ObjectId of the contract
- * 
- * Body Fields:
- * - Additional deal data (optional): Override extracted deal information
- * 
- * Response: Created deal object with contract linkage
- * Integration: Seamless workflow from contract analysis to deal management
- */
-router.post('/:contractId/convert-to-deal',
-  contractController.convertToDeal
-);
-
-// ================================
-// CONTRACT MANAGEMENT ROUTES
-// ================================
-
-/**
- * Update contract status and add notes
- * PATCH /api/contracts/:contractId/status
- * 
- * Access: All subscription tiers (own contracts only)
- * 
- * Path Params:
- * - contractId: MongoDB ObjectId of the contract
- * 
- * Body Fields:
- * - status (required): New status (uploaded, analyzing, analyzed, under_negotiation, finalized, signed, rejected)
- * - notes (optional): Status update notes
- * 
- * Response: Updated contract with new status
- * Workflow: Manual status management for contract lifecycle
- */
-router.patch('/:contractId/status',
-  contractController.updateContractStatus
-);
-
-/**
- * Delete contract (soft delete with recovery option)
- * DELETE /api/contracts/:contractId
- * 
- * Access: All subscription tiers (own contracts only)
- * 
- * Path Params:
- * - contractId: MongoDB ObjectId of the contract
- * 
- * Response: Deletion confirmation with timestamp
- * Behavior: Soft delete preserves data for potential recovery
- * Cascade: Also soft-deletes related analysis and negotiation history
- */
-router.delete('/:contractId',
-  contractController.deleteContract
-);
-
-// ================================
-// ERROR HANDLING MIDDLEWARE
-// ================================
-
-/**
- * Contract-specific error handler
- * Catches and formats errors from contract operations
- */
-router.use((error, req, res, next) => {
-  logError('Contract route error', {
-    error: error.message,
-    stack: error.stack,
-    path: req.path,
-    method: req.method,
-    userId: req.user?.userId,
-    contractId: req.params?.contractId
-  });
-
-  // Handle specific contract errors
-  if (error.message.includes('File size exceeds')) {
-    return res.status(413).json({
-      success: false,
-      message: 'File too large. Maximum size allowed is 25MB.',
-      code: 413,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  if (error.message.includes('Unsupported file type')) {
-    return res.status(415).json({
-      success: false,
-      message: 'Unsupported file format. Please upload PDF, DOC, DOCX, JPG, or PNG files only.',
-      code: 415,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  if (error.message.includes('Contract not found')) {
-    return res.status(404).json({
-      success: false,
-      message: 'Contract not found or access denied.',
-      code: 404,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  if (error.message.includes('AI analysis')) {
-    return res.status(503).json({
-      success: false,
-      message: 'AI analysis service temporarily unavailable. Please try again later.',
-      code: 503,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  if (error.message.includes('subscription') || error.message.includes('tier')) {
-    return res.status(403).json({
-      success: false,
-      message: 'This feature requires a higher subscription tier. Please upgrade your plan.',
-      code: 403,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // Default error response
-  res.status(500).json({
-    success: false,
-    message: 'An unexpected error occurred while processing your contract.',
-    code: 500,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// ================================
-// ROUTE DOCUMENTATION ENDPOINT
-// ================================
 
 /**
  * Get contract module API documentation
@@ -535,10 +223,311 @@ router.get('/docs', (req, res) => {
     }
   };
 
-  res.json(successResponse(
-    'Contract module documentation retrieved',
-    { documentation }
-  ));
+  res.json({
+    success: true,
+    message: 'Contract module documentation retrieved',
+    data: { documentation },
+    timestamp: new Date().toISOString(),
+    code: 200
+  });
+});
+
+// ================================
+// LIST CONTRACTS (BEFORE PARAMETERIZED ROUTES)
+// ================================
+
+/**
+ * List creator's contracts with filtering and pagination
+ * GET /api/contracts
+ * 
+ * Access: All subscription tiers
+ * 
+ * Query Params:
+ * - status (optional): Filter by contract status
+ * - brandName (optional): Filter by brand name (partial match)
+ * - riskLevel (optional): Filter by AI risk level
+ * - limit (optional): Results per page (default: 50, max: 100)
+ * - page (optional): Page number (default: 1)
+ * - sortBy (optional): Sort field (default: createdAt)
+ * - sortOrder (optional): asc/desc (default: desc)
+ * 
+ * Response: Paginated contract list with summary data
+ */
+router.get('/',
+  contractController.listContracts
+);
+
+// ================================
+// CONTRACT UPLOAD & CREATION ROUTES
+// ================================
+
+/**
+ * Upload new contract file with metadata
+ * POST /api/contracts/upload
+ * 
+ * Access: All subscription tiers
+ * File: Single contract file (PDF, DOC, DOCX, JPG, PNG)
+ * Size Limit: 25MB
+ * 
+ * Body Fields:
+ * - brandName (required): Brand/company name
+ * - brandEmail (optional): Brand contact email
+ * - contractValue (optional): Contract value in INR
+ * - platforms (optional): Array or comma-separated platforms
+ * - tags (optional): Array or comma-separated tags
+ * - notes (optional): Additional notes
+ * 
+ * Response: Contract object with upload confirmation
+ * Background: AI analysis starts automatically for Pro+ users
+ */
+router.post('/upload',
+  contractController.upload, // Multer file upload middleware
+  contractController.uploadContract
+);
+
+// ================================
+// PARAMETERIZED ROUTES (MUST COME AFTER SPECIFIC ROUTES!)
+// ================================
+
+/**
+ * Trigger manual AI analysis for uploaded contract
+ * POST /api/contracts/:contractId/analyze
+ * 
+ * Access: Pro, Elite, Agency plans only
+ * 
+ * Path Params:
+ * - contractId: MongoDB ObjectId of the contract
+ * 
+ * Response: AI analysis results with risk assessment
+ * Processing: Full OpenAI GPT-4 contract analysis
+ */
+router.post('/:contractId/analyze',
+  authorizeSubscription(['pro', 'elite', 'agency_starter', 'agency_pro']),
+  contractController.analyzeContract
+);
+
+/**
+ * Generate AI-powered negotiation points for contract
+ * GET /api/contracts/:contractId/negotiation-points
+ * 
+ * Access: Pro, Elite, Agency plans only
+ * Prerequisite: Contract must be analyzed first
+ * 
+ * Path Params:
+ * - contractId: MongoDB ObjectId of the contract
+ * 
+ * Response: Prioritized list of negotiation points with recommendations
+ * AI Logic: Identifies risky clauses and suggests creator-friendly alternatives
+ */
+router.get('/:contractId/negotiation-points',
+  authorizeSubscription(['pro', 'elite', 'agency_starter', 'agency_pro']),
+  contractController.getNegotiationPoints
+);
+
+/**
+ * Generate professional negotiation email template
+ * POST /api/contracts/:contractId/negotiation-email
+ * 
+ * Access: Pro, Elite, Agency plans only
+ * 
+ * Path Params:
+ * - contractId: MongoDB ObjectId of the contract
+ * 
+ * Body Fields:
+ * - negotiationPoints (required): Array of points to negotiate
+ * - tone (optional): 'professional', 'friendly', or 'assertive' (default: professional)
+ * 
+ * Response: Ready-to-send email template with subject and body
+ * AI Logic: Crafts persuasive, professional negotiation emails
+ */
+router.post('/:contractId/negotiation-email',
+  authorizeSubscription(['pro', 'elite', 'agency_starter', 'agency_pro']),
+  contractController.generateNegotiationEmail
+);
+
+/**
+ * Save negotiation attempt and email template
+ * POST /api/contracts/:contractId/negotiations
+ * 
+ * Access: All subscription tiers
+ * 
+ * Path Params:
+ * - contractId: MongoDB ObjectId of the contract
+ * 
+ * Body Fields:
+ * - negotiationPoints (required): Points being negotiated
+ * - emailTemplate (required): Generated email template
+ * - emailSent (optional): Whether email was sent (default: false)
+ * 
+ * Response: Saved negotiation record with round number
+ * Tracking: Maintains complete negotiation history
+ */
+router.post('/:contractId/negotiations',
+  contractController.saveNegotiation
+);
+
+/**
+ * Get complete negotiation history for contract
+ * GET /api/contracts/:contractId/negotiations
+ * 
+ * Access: All subscription tiers (own contracts only)
+ * 
+ * Path Params:
+ * - contractId: MongoDB ObjectId of the contract
+ * 
+ * Response: Chronological list of all negotiation rounds
+ * Data: Email templates, brand responses, outcomes
+ */
+router.get('/:contractId/negotiations',
+  contractController.getNegotiationHistory
+);
+
+/**
+ * Convert analyzed contract to deal in CRM pipeline
+ * POST /api/contracts/:contractId/convert-to-deal
+ * 
+ * Access: All subscription tiers
+ * Prerequisite: Contract should be analyzed for best results
+ * 
+ * Path Params:
+ * - contractId: MongoDB ObjectId of the contract
+ * 
+ * Body Fields:
+ * - Additional deal data (optional): Override extracted deal information
+ * 
+ * Response: Created deal object with contract linkage
+ * Integration: Seamless workflow from contract analysis to deal management
+ */
+router.post('/:contractId/convert-to-deal',
+  contractController.convertToDeal
+);
+
+/**
+ * Update contract status and add notes
+ * PATCH /api/contracts/:contractId/status
+ * 
+ * Access: All subscription tiers (own contracts only)
+ * 
+ * Path Params:
+ * - contractId: MongoDB ObjectId of the contract
+ * 
+ * Body Fields:
+ * - status (required): New status (uploaded, analyzing, analyzed, under_negotiation, finalized, signed, rejected)
+ * - notes (optional): Status update notes
+ * 
+ * Response: Updated contract with new status
+ * Workflow: Manual status management for contract lifecycle
+ */
+router.patch('/:contractId/status',
+  contractController.updateContractStatus
+);
+
+/**
+ * Delete contract (soft delete with recovery option)
+ * DELETE /api/contracts/:contractId
+ * 
+ * Access: All subscription tiers (own contracts only)
+ * 
+ * Path Params:
+ * - contractId: MongoDB ObjectId of the contract
+ * 
+ * Response: Deletion confirmation with timestamp
+ * Behavior: Soft delete preserves data for potential recovery
+ * Cascade: Also soft-deletes related analysis and negotiation history
+ */
+router.delete('/:contractId',
+  contractController.deleteContract
+);
+
+/**
+ * Get single contract with full analysis details
+ * GET /api/contracts/:contractId
+ * 
+ * Access: All subscription tiers (own contracts only)
+ * 
+ * Path Params:
+ * - contractId: MongoDB ObjectId of the contract
+ * 
+ * Response: Complete contract data with AI analysis if available
+ * Authorization: Creator ownership verification
+ * 
+ * NOTE: This route MUST be last among parameterized routes to avoid conflicts!
+ */
+router.get('/:contractId',
+  contractController.getContract
+);
+
+// ================================
+// ERROR HANDLING MIDDLEWARE
+// ================================
+
+/**
+ * Contract-specific error handler
+ * Catches and formats errors from contract operations
+ */
+router.use((error, req, res, next) => {
+  logError('Contract route error', {
+    error: error.message,
+    stack: error.stack,
+    path: req.path,
+    method: req.method,
+    userId: req.user?.userId,
+    contractId: req.params?.contractId
+  });
+
+  // Handle specific contract errors
+  if (error.message.includes('File size exceeds')) {
+    return res.status(413).json({
+      success: false,
+      message: 'File too large. Maximum size allowed is 25MB.',
+      code: 413,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  if (error.message.includes('Unsupported file type')) {
+    return res.status(415).json({
+      success: false,
+      message: 'Unsupported file format. Please upload PDF, DOC, DOCX, JPG, or PNG files only.',
+      code: 415,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  if (error.message.includes('Contract not found')) {
+    return res.status(404).json({
+      success: false,
+      message: 'Contract not found or access denied.',
+      code: 404,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  if (error.message.includes('AI analysis')) {
+    return res.status(503).json({
+      success: false,
+      message: 'AI analysis service temporarily unavailable. Please try again later.',
+      code: 503,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  if (error.message.includes('subscription') || error.message.includes('tier')) {
+    return res.status(403).json({
+      success: false,
+      message: 'This feature requires a higher subscription tier. Please upgrade your plan.',
+      code: 403,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // Default error response
+  res.status(500).json({
+    success: false,
+    message: 'An unexpected error occurred while processing your contract.',
+    code: 500,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // ================================

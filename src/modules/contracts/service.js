@@ -11,7 +11,7 @@
 const { Contract, ContractAnalysis, NegotiationHistory, ContractTemplate } = require('./model');
 const { User } = require('../auth/model');
 const { Deal } = require('../deals/model');
-const { logInfo, logError, asyncHandler } = require('../../shared/utils');
+const { logInfo, logError, logWarn, asyncHandler } = require('../../shared/utils'); // FIXED: Added logWarn
 const AWS = require('aws-sdk');
 const OpenAI = require('openai');
 const pdf = require('pdf-parse');
@@ -634,42 +634,157 @@ const getContractWithAnalysis = async (contractId, creatorId) => {
 };
 
 /**
- * List contracts for creator with filters
- * @param {String} creatorId - Creator ID
- * @param {Object} filters - Filter options
- * @returns {Array} List of contracts
+ * IMMEDIATE FIX: Risk level filtering with automatic collection detection
+ * Replace your entire listCreatorContracts function with this
  */
 const listCreatorContracts = async (creatorId, filters = {}) => {
   try {
-    const query = { creatorId, isActive: true };
+    logInfo('Listing contracts with filters', { creatorId, filters });
     
-    // Apply filters
-    if (filters.status) query.status = filters.status;
-    if (filters.brandName) query.brandName = new RegExp(filters.brandName, 'i');
-    if (filters.riskLevel) {
-      // This requires a lookup to analysis
-      const analysisQuery = { riskLevel: filters.riskLevel };
-      const analyses = await ContractAnalysis.find(analysisQuery);
-      const contractIds = analyses.map(a => a.contractId);
-      query._id = { $in: contractIds };
-    }
-
-    const contracts = await Contract.find(query)
-      .populate('analysisId')
-      .sort({ createdAt: -1 })
-      .limit(filters.limit || 50);
-
-    logInfo('Contracts listed for creator', { 
+    // Start with base query for creator's contracts
+    let baseQuery = { 
       creatorId, 
-      count: contracts.length,
-      filters 
+      isActive: true 
+    };
+    
+    // Apply direct contract filters
+    if (filters.status) {
+      baseQuery.status = filters.status;
+    }
+    
+    if (filters.brandName) {
+      baseQuery.brandName = new RegExp(filters.brandName, 'i');
+    }
+    
+    // Handle riskLevel filter - FIXED VERSION
+    if (filters.riskLevel) {
+      logInfo('Applying risk level filter', { riskLevel: filters.riskLevel });
+      
+      // Method 1: Try to detect the correct collection name
+      const possibleCollectionNames = [
+        'contractanalyses',      // Most likely
+        'contract_analyses',     // With underscore
+        'contractAnalyses',      // CamelCase
+        'contract-analyses',     // With dash
+        'ContractAnalyses'       // PascalCase
+      ];
+      
+      let workingCollectionName = null;
+      
+      // Test each collection name
+      for (const collectionName of possibleCollectionNames) {
+        try {
+          const testResult = await Contract.aggregate([
+            { $match: baseQuery },
+            { $limit: 1 },
+            {
+              $lookup: {
+                from: collectionName,
+                localField: 'analysisId',
+                foreignField: '_id',
+                as: 'analysis'
+              }
+            }
+          ]);
+          
+          if (testResult.length > 0 && testResult[0].analysis.length > 0) {
+            workingCollectionName = collectionName;
+            logInfo(`✅ Found working collection name: ${collectionName}`);
+            break;
+          }
+        } catch (error) {
+          // Continue to next collection name
+          continue;
+        }
+      }
+      
+      if (workingCollectionName) {
+        // Use aggregation with correct collection name
+        const pipeline = [
+          { $match: baseQuery },
+          {
+            $lookup: {
+              from: workingCollectionName,
+              localField: 'analysisId',
+              foreignField: '_id',
+              as: 'analysis'
+            }
+          },
+          {
+            $match: {
+              'analysis.riskLevel': filters.riskLevel,
+              'analysis.isActive': true
+            }
+          },
+          {
+            $sort: { 
+              [filters.sortBy || 'createdAt']: filters.sortOrder === 'asc' ? 1 : -1 
+            }
+          }
+        ];
+        
+        if (filters.offset) pipeline.push({ $skip: filters.offset });
+        if (filters.limit) pipeline.push({ $limit: filters.limit });
+        
+        const contracts = await Contract.aggregate(pipeline);
+        
+        logInfo('Contracts found with aggregation', { 
+          count: contracts.length,
+          riskLevel: filters.riskLevel,
+          collectionName: workingCollectionName
+        });
+        
+        return contracts;
+      } else {
+        // Fallback method: Use populate instead of aggregation
+        logWarn('⚠️ Aggregation failed, using fallback method');
+        
+        const contracts = await Contract.find(baseQuery)
+          .populate({
+            path: 'analysisId',
+            match: { 
+              riskLevel: filters.riskLevel, 
+              isActive: true 
+            }
+          })
+          .sort({ [filters.sortBy || 'createdAt']: filters.sortOrder === 'asc' ? 1 : -1 })
+          .skip(filters.offset || 0)
+          .limit(filters.limit || 50);
+        
+        // Filter out contracts where populate didn't match
+        const filteredContracts = contracts.filter(contract => contract.analysisId);
+        
+        logInfo('Contracts found with fallback method', { 
+          count: filteredContracts.length,
+          riskLevel: filters.riskLevel
+        });
+        
+        return filteredContracts;
+      }
+    }
+    
+    // For queries without riskLevel, use regular find with populate
+    const query = Contract.find(baseQuery)
+      .populate('analysisId')
+      .sort({ [filters.sortBy || 'createdAt']: filters.sortOrder === 'asc' ? 1 : -1 });
+    
+    if (filters.offset) query.skip(filters.offset);
+    if (filters.limit) query.limit(filters.limit);
+    
+    const contracts = await query.exec();
+    
+    logInfo('Contracts found without risk level filter', { 
+      count: contracts.length 
     });
-
+    
     return contracts;
+    
   } catch (error) {
     logError('Failed to list creator contracts', { 
       error: error.message, 
-      creatorId 
+      stack: error.stack,
+      creatorId,
+      filters 
     });
     throw error;
   }
@@ -1088,10 +1203,8 @@ const getContractAnalytics = async (creatorId) => {
 // ================================
 
 /**
- * Convert analyzed contract to deal
- * @param {String} contractId - Contract ID
- * @param {Object} dealData - Additional deal data
- * @returns {Object} Created deal
+ * CORRECTED: Convert analyzed contract to deal
+ * Fixed based on actual Deal model validation errors
  */
 const convertContractToDeal = async (contractId, dealData = {}) => {
   try {
@@ -1104,66 +1217,226 @@ const convertContractToDeal = async (contractId, dealData = {}) => {
 
     const analysis = contract.analysisId;
     if (!analysis) {
-      throw new Error('Contract analysis not found');
+      logWarn('Contract analysis not found, proceeding with basic conversion', { contractId });
     }
 
-    // Extract deal information from analysis
-    const dealInfo = {
-      creatorId: contract.creatorId,
-      brandName: contract.brandName,
-      brandEmail: contract.brandEmail,
-      dealValue: contract.contractValue?.amount || dealData.dealValue || 0,
-      currency: contract.contractValue?.currency || 'INR',
-      platforms: contract.platforms || [],
-      status: 'pitched',
-      contractId: contract._id,
-      ...dealData
+    // Get creator details for deal title
+    const creator = await User.findById(contract.creatorId);
+    if (!creator) {
+      throw new Error('Creator not found');
+    }
+
+    // Map deliverable types to correct enum values (based on validation errors)
+    const mapDeliverableType = (analysisType) => {
+      const typeMapping = {
+        'YouTube video': 'youtube_video',
+        'Instagram post': 'instagram_post', 
+        'Instagram story': 'instagram_story',
+        'Instagram reel': 'instagram_reel',
+        'TikTok video': 'tiktok_video',
+        'Facebook post': 'facebook_post',
+        'LinkedIn post': 'linkedin_post',
+        'Twitter post': 'twitter_post',
+        'Snapchat story': 'snapchat_story',
+        'blog post': 'blog_post',
+        'article': 'article',
+        'live stream': 'live_stream',
+        'podcast': 'podcast',
+        'webinar': 'webinar',
+        'video': 'youtube_video',
+        'post': 'instagram_post',
+        'story': 'instagram_story',
+        'reel': 'instagram_reel'
+      };
+      
+      return typeMapping[analysisType] || 'instagram_post'; // Default to instagram_post
     };
 
-    // Extract deliverables from analysis
-    if (analysis.clauseAnalysis.deliverables?.detected && 
+    // Map status to correct enum values (based on validation errors)
+    const mapStatus = (inputStatus) => {
+      const statusMapping = {
+        'inquiry': 'potential',
+        'pitched': 'pitched', 
+        'negotiating': 'negotiating',
+        'approved': 'confirmed',
+        'in_progress': 'in_progress',
+        'delivered': 'delivered',
+        'completed': 'completed',
+        'cancelled': 'cancelled'
+      };
+      
+      return statusMapping[inputStatus] || 'potential'; // Default to 'potential'
+    };
+
+    // Build the deal object with corrected field mapping
+    const dealInfo = {
+      // Required fields for Deal model
+      userId: contract.creatorId,
+      title: dealData.title || `${contract.brandName} - ${creator.fullName || creator.name} Collaboration`,
+      
+      // Brand information (nested object with correct structure)
+      brand: {
+        name: contract.brandName,
+        email: contract.brandEmail || dealData.brandEmail || '',
+        // contactPerson expects an object structure based on error
+        contactPerson: dealData.brandContactPerson ? {
+          name: dealData.brandContactPerson,
+          role: dealData.brandContactRole || 'Marketing Manager',
+          email: dealData.brandContactEmail || contract.brandEmail || ''
+        } : undefined,
+        website: dealData.brandWebsite || '',
+        companySize: dealData.brandCompanySize || 'medium'
+      },
+      
+      // Deal value (ensure amount is set)
+      dealValue: {
+        amount: Number(dealData.dealValue || contract.contractValue?.amount || 0),
+        currency: dealData.currency || contract.contractValue?.currency || 'INR'
+      },
+      
+      // Platform (singular - use primary platform)
+      platform: dealData.platform || contract.platforms?.[0] || 'instagram',
+      
+      // Additional platforms 
+      platforms: contract.platforms || [dealData.platform || 'instagram'],
+      
+      // Status (use mapped status)
+      status: mapStatus(dealData.status || 'potential'),
+      
+      // Deal type
+      dealType: dealData.dealType || 'collaboration',
+      
+      // Timeline
+      timeline: dealData.timeline || {
+        startDate: new Date(),
+        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days from now
+      },
+      
+      // Communication and notes
+      notes: dealData.notes || `Deal created from contract analysis. Original contract: ${contract.title}`,
+      
+      // Link back to contract
+      contractId: contract._id,
+      
+      // Additional metadata
+      createdFrom: 'contract_conversion',
+      
+      // Priority and stage
+      priority: dealData.priority || 'medium',
+      stage: dealData.stage || 'negotiation'
+    };
+
+    // Extract and map deliverables from analysis or dealData
+    if (analysis?.clauseAnalysis?.deliverables?.detected && 
         analysis.clauseAnalysis.deliverables.items) {
       dealInfo.deliverables = analysis.clauseAnalysis.deliverables.items.map(item => ({
-        type: item.type,
-        quantity: item.quantity || 1,
-        description: `${item.type} content`,
-        status: 'pending'
+        type: mapDeliverableType(item.type),
+        quantity: Number(item.quantity) || 1,
+        description: item.description || `${item.type} content for ${contract.brandName}`,
+        status: 'pending',
+        platform: contract.platforms?.[0] || 'instagram',
+        deadline: item.deadline ? new Date(item.deadline) : undefined
       }));
+    } else if (dealData.deliverables && Array.isArray(dealData.deliverables)) {
+      // Use deliverables from dealData if provided
+      dealInfo.deliverables = dealData.deliverables.map(item => ({
+        type: mapDeliverableType(item.type),
+        quantity: Number(item.quantity) || 1,
+        description: item.description || `${item.type} content for ${contract.brandName}`,
+        status: item.status || 'pending',
+        platform: item.platform || contract.platforms?.[0] || 'instagram',
+        deadline: item.deadline ? new Date(item.deadline) : undefined
+      }));
+    } else {
+      // Default deliverables based on contract platforms
+      dealInfo.deliverables = [{
+        type: 'instagram_post',
+        quantity: 1,
+        description: `Content for ${contract.brandName}`,
+        status: 'pending',
+        platform: contract.platforms?.[0] || 'instagram'
+      }];
     }
 
-    // Extract timeline from analysis
-    if (analysis.clauseAnalysis.deliverables?.items) {
-      const deadlines = analysis.clauseAnalysis.deliverables.items
-        .filter(item => item.deadline)
-        .map(item => new Date(item.deadline));
-      
-      if (deadlines.length > 0) {
-        dealInfo.timeline = {
-          startDate: new Date(),
-          endDate: new Date(Math.max(...deadlines))
-        };
+    // Extract payment terms from analysis
+    if (analysis?.clauseAnalysis?.paymentTerms?.detected) {
+      dealInfo.paymentTerms = {
+        method: analysis.clauseAnalysis.paymentTerms.paymentMethod || 'bank_transfer',
+        schedule: 'milestone', // Default
+        daysToPayment: Number(analysis.clauseAnalysis.paymentTerms.paymentDays) || 30,
+        currency: dealInfo.dealValue.currency
+      };
+    }
+
+    // Additional deal data (only add if not already set)
+    Object.keys(dealData).forEach(key => {
+      if (!dealInfo.hasOwnProperty(key) && dealData[key] !== undefined) {
+        dealInfo[key] = dealData[key];
       }
+    });
+
+    // Clean up undefined values
+    Object.keys(dealInfo).forEach(key => {
+      if (dealInfo[key] === undefined) {
+        delete dealInfo[key];
+      }
+    });
+
+    // Ensure required nested objects have required fields
+    if (!dealInfo.dealValue.amount) {
+      dealInfo.dealValue.amount = 0; // Set to 0 if not provided
     }
 
-    // Use Deal service to create deal (assuming Deal model exists)
+    // Remove contactPerson if it's empty to avoid validation issues
+    if (dealInfo.brand.contactPerson && !dealInfo.brand.contactPerson.name) {
+      delete dealInfo.brand.contactPerson;
+    }
+
+    logInfo('Deal info prepared for creation', { 
+      contractId, 
+      dealInfo: {
+        title: dealInfo.title,
+        brand: dealInfo.brand.name,
+        dealValue: dealInfo.dealValue,
+        platform: dealInfo.platform,
+        status: dealInfo.status,
+        deliverables: dealInfo.deliverables?.length || 0
+      }
+    });
+
+    // Use Deal service to create deal
     const Deal = require('../deals/model').Deal;
     const deal = new Deal(dealInfo);
+    
+    // Validate before saving
+    const validationError = deal.validateSync();
+    if (validationError) {
+      logError('Deal validation failed before save', { 
+        validationError: validationError.message,
+        dealInfo: JSON.stringify(dealInfo, null, 2)
+      });
+      throw new Error(`Deal validation failed: ${validationError.message}`);
+    }
+    
     const savedDeal = await deal.save();
 
     // Update contract with deal reference
     contract.dealId = savedDeal._id;
+    contract.status = 'finalized'; // Update contract status
     await contract.save();
 
     logInfo('Contract converted to deal successfully', { 
       contractId, 
-      dealId: savedDeal._id 
+      dealId: savedDeal._id,
+      dealTitle: savedDeal.title
     });
 
     return savedDeal;
   } catch (error) {
     logError('Failed to convert contract to deal', { 
       error: error.message, 
-      contractId 
+      contractId,
+      stack: error.stack
     });
     throw error;
   }

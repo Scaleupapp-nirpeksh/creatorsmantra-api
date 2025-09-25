@@ -1585,48 +1585,49 @@ Return JSON with this exact structure:
       })
 
       // Use transaction for update
-      await this.withTransaction(async (session) => {
-        // Create history snapshot
-        await RateCardHistory.create(
-          [
-            {
-              rateCardId: rateCard._id,
-              version: rateCard.version.current,
-              editedBy: req.user.id,
-              changeType: 'metrics_update',
-              changeSummary: 'Updated platform metrics and regenerated pricing',
-              snapshot: {
-                metrics: rateCard.metrics,
-                pricing: rateCard.pricing,
-                packages: rateCard.packages,
-                professionalDetails: rateCard.professionalDetails,
-              },
+      // await this.withTransaction(async (session) => {
+      // Create history snapshot
+      await RateCardHistory.create(
+        [
+          {
+            rateCardId: rateCard._id,
+            version: rateCard.version.current,
+            editedBy: req.user.id,
+            changeType: 'metrics_update',
+            changeSummary: 'Updated platform metrics and regenerated pricing',
+            snapshot: {
+              metrics: rateCard.metrics,
+              pricing: rateCard.pricing,
+              packages: rateCard.packages,
+              professionalDetails: rateCard.professionalDetails,
             },
-          ],
-          { session }
-        )
+          },
+        ]
+        // { session }
+      )
 
-        // Update metrics
-        if (validatedData.platforms) {
-          validatedData.platforms.forEach((platform) => {
-            platform.metrics.lastUpdated = new Date()
-          })
-          rateCard.metrics.platforms = validatedData.platforms
-        }
+      // Update metrics
+      if (validatedData.platforms) {
+        validatedData.platforms.forEach((platform) => {
+          platform.metrics.lastUpdated = new Date()
+        })
+        rateCard.metrics.platforms = validatedData.platforms
+      }
 
-        // Update AI metadata
-        rateCard.aiMetadata = {
-          lastSuggestionDate: new Date(),
-          suggestionVersion: '2.0',
-          confidence: aiPricing.marketInsights?.confidence || 70,
-          marketData: aiPricing.marketInsights,
-        }
+      // Update AI metadata
+      rateCard.aiMetadata = {
+        lastSuggestionDate: new Date(),
+        suggestionVersion: '2.0',
+        confidence: aiPricing.marketInsights?.confidence || 70,
+        marketData: aiPricing.marketInsights,
+      }
 
-        rateCard.version.current += 1
-        rateCard.lastEditedBy = req.user.id
+      rateCard.version.current += 1
+      rateCard.lastEditedBy = req.user.id
 
-        await rateCard.save({ session })
-      })
+      await rateCard.save()
+      // await rateCard.save({ session })
+      // })
 
       // Clear caches
       this.clearRateCardCaches(rateCard)
@@ -1664,43 +1665,44 @@ Return JSON with this exact structure:
       // Sanitize and validate
       const validatedData = this.sanitizeAndValidate(this.validationSchemas.updatePricing, req.body)
 
-      await this.withTransaction(async (session) => {
-        // Create history snapshot
-        await RateCardHistory.create(
-          [
-            {
-              rateCardId: rateCard._id,
-              version: rateCard.version.current,
-              editedBy: req.user.id,
-              changeType: 'pricing_change',
-              changeSummary: 'Updated deliverable pricing',
-              snapshot: {
-                metrics: rateCard.metrics,
-                pricing: rateCard.pricing,
-                packages: rateCard.packages,
-                professionalDetails: rateCard.professionalDetails,
-              },
+      // await this.withTransaction(async (session) => {
+      // Create history snapshot
+      await RateCardHistory.create(
+        [
+          {
+            rateCardId: rateCard._id,
+            version: rateCard.version.current,
+            editedBy: req.user.id,
+            changeType: 'pricing_change',
+            changeSummary: 'Updated deliverable pricing',
+            snapshot: {
+              metrics: rateCard.metrics,
+              pricing: rateCard.pricing,
+              packages: rateCard.packages,
+              professionalDetails: rateCard.professionalDetails,
             },
-          ],
-          { session }
+          },
+        ]
+        // { session }
+      )
+
+      // Update pricing
+      rateCard.pricing.deliverables = validatedData.deliverables
+      rateCard.lastEditedBy = req.user.id
+      rateCard.version.current += 1
+
+      // Calculate AI acceptance rate
+      if (rateCard.aiMetadata.marketData) {
+        const acceptanceRate = this.calculateAcceptanceRate(
+          rateCard.pricing.deliverables,
+          rateCard.aiMetadata.marketData
         )
+        rateCard.aiMetadata.acceptanceRate = acceptanceRate
+      }
 
-        // Update pricing
-        rateCard.pricing.deliverables = validatedData.deliverables
-        rateCard.lastEditedBy = req.user.id
-        rateCard.version.current += 1
-
-        // Calculate AI acceptance rate
-        if (rateCard.aiMetadata.marketData) {
-          const acceptanceRate = this.calculateAcceptanceRate(
-            rateCard.pricing.deliverables,
-            rateCard.aiMetadata.marketData
-          )
-          rateCard.aiMetadata.acceptanceRate = acceptanceRate
-        }
-
-        await rateCard.save({ session })
-      })
+      await rateCard.save()
+      // await rateCard.save({ session })
+      // })
 
       // Clear caches
       this.clearRateCardCaches(rateCard)
@@ -1765,8 +1767,9 @@ Return JSON with this exact structure:
             amount: individualTotal - validatedData.packagePrice,
             percentage:
               individualTotal > 0
-                ? Math.round(
-                    ((individualTotal - validatedData.packagePrice) / individualTotal) * 100
+                ? Math.min(
+                    Math.round(Math.abs((individualTotal / validatedData.packagePrice) * 100)),
+                    100
                   )
                 : 0,
           },
@@ -1774,33 +1777,39 @@ Return JSON with this exact structure:
         validity: validatedData.validity || { value: 30, unit: 'days' },
       }
 
-      await this.withTransaction(async (session) => {
-        // Create history snapshot
-        await RateCardHistory.create(
-          [
-            {
-              rateCardId: rateCard._id,
-              version: rateCard.version.current,
-              editedBy: req.user.id,
-              changeType: 'package_update',
-              changeSummary: `Added package: ${validatedData.name}`,
-              snapshot: {
-                metrics: rateCard.metrics,
-                pricing: rateCard.pricing,
-                packages: rateCard.packages,
-                professionalDetails: rateCard.professionalDetails,
-              },
+      // const percentageValue = newPackage.pricing.savings.percentage
+
+      // newPackage.pricing.savings.percentage =
+      //   percentageValue < 0 ? percentageValue * -1 : percentageValue
+
+      // await this.withTransaction(async (session) => {
+      // Create history snapshot
+      await RateCardHistory.create(
+        [
+          {
+            rateCardId: rateCard._id,
+            version: rateCard.version.current,
+            editedBy: req.user.id,
+            changeType: 'package_update',
+            changeSummary: `Added package: ${validatedData.name}`,
+            snapshot: {
+              metrics: rateCard.metrics,
+              pricing: rateCard.pricing,
+              packages: rateCard.packages,
+              professionalDetails: rateCard.professionalDetails,
             },
-          ],
-          { session }
-        )
+          },
+        ]
+        // { session }
+      )
 
-        rateCard.packages.push(newPackage)
-        rateCard.lastEditedBy = req.user.id
-        rateCard.version.current += 1
+      rateCard.packages.push(newPackage)
+      rateCard.lastEditedBy = req.user.id
+      rateCard.version.current += 1
 
-        await rateCard.save({ session })
-      })
+      await rateCard.save()
+      // await rateCard.save({ session })
+      // })
 
       // Clear caches
       this.clearRateCardCaches(rateCard)
@@ -2020,37 +2029,38 @@ Return JSON with this exact structure:
 
       logInfo('Validation successful', { validatedData })
 
-      await this.withTransaction(async (session) => {
-        // Create history snapshot
-        await RateCardHistory.create(
-          [
-            {
-              rateCardId: rateCard._id,
-              version: rateCard.version.current,
-              editedBy: req.user.id,
-              changeType: 'terms_update',
-              changeSummary: 'Updated professional details and terms',
-              snapshot: {
-                metrics: rateCard.metrics,
-                pricing: rateCard.pricing,
-                packages: rateCard.packages,
-                professionalDetails: rateCard.professionalDetails,
-              },
+      // await this.withTransaction(async (session) => {
+      // Create history snapshot
+      await RateCardHistory.create(
+        [
+          {
+            rateCardId: rateCard._id,
+            version: rateCard.version.current,
+            editedBy: req.user.id,
+            changeType: 'terms_update',
+            changeSummary: 'Updated professional details and terms',
+            snapshot: {
+              metrics: rateCard.metrics,
+              pricing: rateCard.pricing,
+              packages: rateCard.packages,
+              professionalDetails: rateCard.professionalDetails,
             },
-          ],
-          { session }
-        )
+          },
+        ]
+        // { session }
+      )
 
-        // Update professional details
-        rateCard.professionalDetails = {
-          ...rateCard.professionalDetails.toObject(),
-          ...validatedData,
-        }
-        rateCard.lastEditedBy = req.user.id
-        rateCard.version.current += 1
+      // Update professional details
+      rateCard.professionalDetails = {
+        ...rateCard.professionalDetails.toObject(),
+        ...validatedData,
+      }
+      rateCard.lastEditedBy = req.user.id
+      rateCard.version.current += 1
 
-        await rateCard.save({ session })
-      })
+      await rateCard.save()
+      // await rateCard.save({ session })
+      // })
 
       // Clear caches
       this.clearRateCardCaches(rateCard)

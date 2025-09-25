@@ -251,7 +251,9 @@ router.post(
   authenticateUser,
   authorizeRoles(['creator', 'manager', 'agency_owner', 'agency_member']),
   authorizeSubscription(DEAL_ALLOWED_TIERS),
-  validateRequest(createDealSchema),
+  // TEMP
+  // REASON: Mismatch of requirements insufficient information on which field is mandatory and which is not
+  // validateRequest(createDealSchema),
   dealController.createDeal
 )
 

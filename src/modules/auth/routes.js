@@ -497,7 +497,6 @@ router.get(
   authenticateUser,
   asyncHandler(async (req, res) => {
     const userProfile = await authService.getUserProfile(req.user.id)
-
     res.status(200).json(successResponse('Profile retrieved successfully', { user: userProfile }))
   })
 )

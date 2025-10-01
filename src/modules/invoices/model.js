@@ -374,7 +374,16 @@ const invoiceSchema = new mongoose.Schema(
         // Platform and deliverable details
         platform: {
           type: String,
-          enum: ['instagram', 'youtube', 'linkedin', 'twitter', 'facebook', 'multiple', 'other'],
+          enum: [
+            'instagram',
+            'youtube',
+            'linkedin',
+            'twitter',
+            'facebook',
+            'multiple',
+            'tiktok',
+            'other',
+          ],
         },
 
         deliverableType: {

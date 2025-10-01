@@ -1423,8 +1423,207 @@ dealSchema.statics.getRevenueAnalytics = function (userId, period = '30d') {
           $sum: { $cond: [{ $eq: ['$stage', 'paid'] }, '$dealValue.finalAmount', 0] },
         },
         avgDealValue: { $avg: '$dealValue.amount' },
+        activeDeals: {
+          $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] },
+        },
       },
     },
+  ])
+}
+
+// ---------------- For Dashboard ----------------
+dealSchema.statics.getDealPipelineData = function (userId, period = '30d') {
+  const now = new Date()
+  let startDate
+
+  switch (period) {
+    case '7d':
+      startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      break
+    case '30d':
+      startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+      break
+    case '90d':
+      startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
+      break
+    default:
+      startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+  }
+
+  return this.aggregate([
+    {
+      $match: {
+        userId: new mongoose.Types.ObjectId(userId),
+        createdAt: { $gte: startDate },
+        status: { $ne: 'cancelled' },
+      },
+    },
+    {
+      $group: {
+        _id: '$stage',
+        value: { $sum: 1 },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        name: '$_id',
+        value: 1,
+      },
+    },
+  ])
+}
+
+dealSchema.statics.getRevenueOverview = function (userId) {
+  return this.aggregate([
+    {
+      $match: {
+        userId: new mongoose.Types.ObjectId(userId),
+        status: { $ne: 'cancelled' },
+      },
+    },
+    {
+      $group: {
+        _id: { $month: '$createdAt' },
+        revenue: { $sum: '$dealValue.finalAmount' },
+        deals: { $sum: 1 },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        month: {
+          $arrayElemAt: [
+            [
+              '',
+              'Jan',
+              'Feb',
+              'Mar',
+              'Apr',
+              'May',
+              'Jun',
+              'Jul',
+              'Aug',
+              'Sep',
+              'Oct',
+              'Nov',
+              'Dec',
+            ],
+            '$_id',
+          ],
+        },
+        revenue: 1,
+        deals: 1,
+      },
+    },
+    { $sort: { month: 1 } },
+  ])
+}
+
+dealSchema.statics.getRecentActivites = function (userId) {
+  return this.aggregate([
+    {
+      $match: {
+        userId: new mongoose.Types.ObjectId(userId),
+      },
+    },
+    { $sort: { updatedAt: -1 } },
+    {
+      $project: {
+        _id: 0,
+        title: 1,
+        description: {
+          $concat: [
+            'Brand: ',
+            { $ifNull: ['$brand.name', ''] },
+            ' | Value: ₹',
+            { $toString: { $ifNull: ['$dealValue.finalAmount', 0] } },
+            ' | Deliverables: ',
+            { $toString: { $size: { $ifNull: ['$deliverables', []] } } },
+          ],
+        },
+        updatedAt: 1,
+        type: { $literal: 'deals' },
+      },
+    },
+    { $limit: 1 },
+    {
+      $unionWith: {
+        coll: 'invoices',
+        pipeline: [
+          { $sort: { updatedAt: -1 } },
+          {
+            $project: {
+              _id: 0,
+              title: '$clientDetails.name',
+              description: {
+                $concat: [
+                  'Invoice #: ',
+                  { $toString: { $ifNull: ['$invoiceNumber', ''] } },
+                  ' | Status: ',
+                  { $ifNull: ['$status', ''] },
+                  ' | Amount: ₹',
+                  { $toString: { $ifNull: ['$taxSettings.taxCalculation.finalAmount', 0] } },
+                ],
+              },
+              updatedAt: 1,
+              type: { $literal: 'invoices' },
+            },
+          },
+          { $limit: 1 },
+        ],
+      },
+    },
+    {
+      $unionWith: {
+        coll: 'contracts',
+        pipeline: [
+          { $sort: { updatedAt: -1 } },
+          {
+            $project: {
+              _id: 0,
+              title: '$title',
+              description: {
+                $concat: [
+                  'Brand: ',
+                  { $ifNull: ['$brandName', ''] },
+                  ' | Status: ',
+                  { $ifNull: ['$status', ''] },
+                  ' | Contract Value: ₹',
+                  { $toString: { $ifNull: ['$contractValue.amount', 0] } },
+                ],
+              },
+              updatedAt: 1,
+              type: { $literal: 'contracts' },
+            },
+          },
+          { $limit: 1 },
+        ],
+      },
+    },
+  ])
+}
+
+dealSchema.statics.getUpcomingTasks = function (userId) {
+  return this.aggregate([
+    {
+      $match: {
+        userId: new mongoose.Types.ObjectId(userId),
+      },
+    },
+    { $unwind: '$deliverables' },
+    { $sort: { 'deliverables.deadline': 1 } },
+    { $limit: 3 },
+    {
+      $project: {
+        _id: 1,
+        title: '$deliverables.description',
+        dueDate: '$deliverables.deadline',
+        priority: '$priority',
+        status: '$status',
+      },
+    },
+    { $sort: { dueDate: -1 } },
   ])
 }
 

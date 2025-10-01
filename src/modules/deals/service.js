@@ -1026,6 +1026,7 @@ class DealService {
           avgDealValue: 0,
           conversionRate: 0,
           period,
+          activeDeals: 0,
         })
       }
 

@@ -423,7 +423,8 @@ router.post(
   standardLimit,
   authenticateUser,
   authorizeSubscription(['starter', 'pro', 'elite']),
-  validateRequest(createIndividualInvoiceSchema),
+  // TEMP
+  // validateRequest(createIndividualInvoiceSchema),
   invoiceController.createIndividualInvoice
 )
 

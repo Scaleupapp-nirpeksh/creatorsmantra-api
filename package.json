@@ -4,7 +4,7 @@
   "description": "CreatorsMantra Backend API - Creator Economy Management Platform",
   "main": "server.js",
   "scripts": {
-    "dev": "node --max-old-space-size=2048 --expose-gc --optimize-for-size server.js",
+    "dev": "node --max-old-space-size=2048 --expose-gc --optimize-for-size --watch server.js",
     "start": "node --max-old-space-size=4096 --expose-gc --optimize-for-size server.js",
     "start:production": "node --max-old-space-size=8192 --expose-gc --optimize-for-size server.js",
     "test:routes": "node -e \"try { console.log('Testing route loading...'); const routes = require('./src/modules/ratecards/routes'); console.log('✓ Routes loaded'); } catch(e) { console.error('✗ Route error:', e.message); }\"",

@@ -25,6 +25,7 @@ const {
 const PDFDocument = require('pdfkit')
 const fs = require('fs')
 const path = require('path')
+const { default: mongoose } = require('mongoose')
 
 // ============================================
 // INVOICE CREATION SERVICE
@@ -1217,16 +1218,26 @@ class InvoiceService {
       const { startDate, endDate } = dateRange
       const query = { creatorId }
 
-      if (startDate && endDate) {
-        query['invoiceSettings.invoiceDate'] = {
-          $gte: new Date(startDate),
-          $lte: new Date(endDate),
-        }
-      }
+      // if (startDate && endDate) {
+      // query['invoiceSettings.invoiceDate'] = {
+      //   $gte: new Date(startDate),
+      //   $lte: new Date(endDate),
+      // }
+      // }
 
       // Aggregate analytics
+      // const analyticsData = await Invoice.find(query)
       const analytics = await Invoice.aggregate([
-        { $match: query },
+        {
+          $match: {
+            creatorId: new mongoose.Types.ObjectId(creatorId),
+            // TEMP:
+            // Disabled Duration Filter
+            // invoiceSettings: {
+            //   invoiceDate: { $gte: new Date(startDate), $lte: new Date(endDate) },
+            // },
+          },
+        },
         {
           $group: {
             _id: null,
@@ -1245,6 +1256,11 @@ class InvoiceService {
             overdueCount: {
               $sum: {
                 $cond: [{ $eq: ['$status', 'overdue'] }, 1, 0],
+              },
+            },
+            pendingInvoices: {
+              $sum: {
+                $cond: [{ $ne: ['$status', 'paid'] }, 1, 0],
               },
             },
           },

@@ -59,14 +59,14 @@ class DashboardService {
             dealsReport: {
               ...dealsReport[0],
               conversionRate:
-                dealsReport[0].totalDeals > 0
-                  ? (dealsReport[0].paidDeals / dealsReport[0].totalDeals) * 100
+                dealsReport[0]?.totalDeals > 0
+                  ? (dealsReport[0]?.paidDeals / dealsReport[0]?.totalDeals) * 100
                   : 0,
             },
             invoiceReport,
             scriptsReport,
             rateCardsReport: {
-              activeRateCards: rateCardsReport?.filter((item) => !item.isDeleted)?.length ?? 0,
+              activeRateCards: rateCardsReport?.filter((item) => !item?.isDeleted)?.length ?? 0,
               totalRateCards: rateCardsReport?.length ?? 0,
             },
             contractsReport,

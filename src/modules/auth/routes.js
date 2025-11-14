@@ -1,29 +1,20 @@
 /**
  * CreatorsMantra Backend - Authentication Routes
  * Complete API endpoints for authentication, registration, and user management
- * 
+ *
  * @author CreatorsMantra Team
  * @version 1.0.0
  */
 
-const express = require('express');
-const rateLimit = require('express-rate-limit');
-const Joi = require('joi');
-const authService = require('./service');
-const { User, CreatorProfile, SubscriptionHistory } = require('./model');
-const { 
-  authenticateUser, 
-  validateRequest,
-  optionalAuth 
-} = require('../../shared/middleware');
-const { 
-  asyncHandler, 
-  successResponse, 
-  errorResponse, 
-  log 
-} = require('../../shared/utils');
+const express = require('express')
+const rateLimit = require('express-rate-limit')
+const Joi = require('joi')
+const authService = require('./service')
+const { User, CreatorProfile } = require('./model')
+const { authenticateUser, validateRequest } = require('../../shared/middleware')
+const { asyncHandler, successResponse, errorResponse, log } = require('../../shared/utils')
 
-const router = express.Router();
+const router = express.Router()
 
 // ============================================
 // RATE LIMITING CONFIGURATIONS
@@ -36,11 +27,11 @@ const otpRateLimit = rateLimit({
   message: {
     success: false,
     message: 'Too many OTP requests. Please try again after 15 minutes.',
-    code: 'OTP_RATE_LIMIT'
+    code: 'OTP_RATE_LIMIT',
   },
   standardHeaders: true,
-  legacyHeaders: false
-});
+  legacyHeaders: false,
+})
 
 // Login rate limiting - max 10 requests per 15 minutes per IP
 const loginRateLimit = rateLimit({
@@ -49,11 +40,11 @@ const loginRateLimit = rateLimit({
   message: {
     success: false,
     message: 'Too many login attempts. Please try again after 15 minutes.',
-    code: 'LOGIN_RATE_LIMIT'
+    code: 'LOGIN_RATE_LIMIT',
   },
   standardHeaders: true,
-  legacyHeaders: false
-});
+  legacyHeaders: false,
+})
 
 // Registration rate limiting - max 5 requests per hour per IP
 const registrationRateLimit = rateLimit({
@@ -62,11 +53,11 @@ const registrationRateLimit = rateLimit({
   message: {
     success: false,
     message: 'Too many registration attempts. Please try again after 1 hour.',
-    code: 'REGISTRATION_RATE_LIMIT'
+    code: 'REGISTRATION_RATE_LIMIT',
   },
   standardHeaders: true,
-  legacyHeaders: false
-});
+  legacyHeaders: false,
+})
 
 // ============================================
 // VALIDATION SCHEMAS
@@ -78,9 +69,9 @@ const phoneSchema = Joi.object({
     .required()
     .messages({
       'string.pattern.base': 'Please provide a valid Indian mobile number',
-      'any.required': 'Phone number is required'
-    })
-});
+      'any.required': 'Phone number is required',
+    }),
+})
 
 const otpRequestSchema = Joi.object({
   phone: Joi.string()
@@ -88,12 +79,10 @@ const otpRequestSchema = Joi.object({
     .required()
     .messages({
       'string.pattern.base': 'Please provide a valid Indian mobile number',
-      'any.required': 'Phone number is required'
+      'any.required': 'Phone number is required',
     }),
-  purpose: Joi.string()
-    .valid('registration', 'login', 'password_reset')
-    .default('registration')
-});
+  purpose: Joi.string().valid('registration', 'login', 'password_reset').default('registration'),
+})
 
 const otpVerificationSchema = Joi.object({
   phone: Joi.string()
@@ -105,30 +94,19 @@ const otpVerificationSchema = Joi.object({
     .required()
     .messages({
       'string.length': 'OTP must be 6 digits',
-      'string.pattern.base': 'OTP must contain only numbers'
+      'string.pattern.base': 'OTP must contain only numbers',
     }),
-  purpose: Joi.string()
-    .valid('registration', 'login', 'password_reset')
-    .default('registration')
-});
+  purpose: Joi.string().valid('registration', 'login', 'password_reset').default('registration'),
+})
 
 const registrationSchema = Joi.object({
-  fullName: Joi.string()
-    .trim()
-    .min(2)
-    .max(100)
-    .required()
-    .messages({
-      'string.min': 'Full name must be at least 2 characters',
-      'string.max': 'Full name cannot exceed 100 characters'
-    }),
-  email: Joi.string()
-    .email()
-    .lowercase()
-    .required()
-    .messages({
-      'string.email': 'Please provide a valid email address'
-    }),
+  fullName: Joi.string().trim().min(2).max(100).required().messages({
+    'string.min': 'Full name must be at least 2 characters',
+    'string.max': 'Full name cannot exceed 100 characters',
+  }),
+  email: Joi.string().email().lowercase().required().messages({
+    'string.email': 'Please provide a valid email address',
+  }),
   phone: Joi.string()
     .pattern(/^[6-9]\d{9}$/)
     .required(),
@@ -138,41 +116,48 @@ const registrationSchema = Joi.object({
     .required()
     .messages({
       'string.min': 'Password must be at least 8 characters',
-      'string.pattern.base': 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
+      'string.pattern.base':
+        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
     }),
-  userType: Joi.string()
-    .valid('creator', 'creator_with_manager')
-    .default('creator'),
+  userType: Joi.string().valid('creator', 'creator_with_manager').default('creator'),
   creatorType: Joi.string()
-    .valid('lifestyle', 'fashion', 'beauty', 'tech', 'food', 'travel', 'fitness', 'comedy', 'education', 'business', 'other')
+    .valid(
+      'lifestyle',
+      'fashion',
+      'beauty',
+      'tech',
+      'food',
+      'travel',
+      'fitness',
+      'comedy',
+      'education',
+      'business',
+      'other'
+    )
     .default('lifestyle'),
   socialProfiles: Joi.object({
     instagram: Joi.object({
       username: Joi.string().trim().lowercase().allow(''),
       followersCount: Joi.number().min(0).default(0),
       avgLikes: Joi.number().min(0).default(0),
-      avgComments: Joi.number().min(0).default(0)
+      avgComments: Joi.number().min(0).default(0),
     }).optional(),
     youtube: Joi.object({
       channelName: Joi.string().trim().allow(''),
       subscribersCount: Joi.number().min(0).default(0),
-      avgViews: Joi.number().min(0).default(0)
-    }).optional()
-  }).optional()
-});
+      avgViews: Joi.number().min(0).default(0),
+    }).optional(),
+  }).optional(),
+})
 
 const loginSchema = Joi.object({
-  identifier: Joi.string()
-    .required()
-    .messages({
-      'any.required': 'Email or phone number is required'
-    }),
-  password: Joi.string()
-    .required()
-    .messages({
-      'any.required': 'Password is required'
-    })
-});
+  identifier: Joi.string().required().messages({
+    'any.required': 'Email or phone number is required',
+  }),
+  password: Joi.string().required().messages({
+    'any.required': 'Password is required',
+  }),
+})
 
 const otpLoginSchema = Joi.object({
   phone: Joi.string()
@@ -181,8 +166,8 @@ const otpLoginSchema = Joi.object({
   otpCode: Joi.string()
     .length(6)
     .pattern(/^\d{6}$/)
-    .required()
-});
+    .required(),
+})
 
 const passwordResetSchema = Joi.object({
   phone: Joi.string()
@@ -198,9 +183,10 @@ const passwordResetSchema = Joi.object({
     .required()
     .messages({
       'string.min': 'Password must be at least 8 characters',
-      'string.pattern.base': 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
-    })
-});
+      'string.pattern.base':
+        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
+    }),
+})
 
 const profileUpdateSchema = Joi.object({
   fullName: Joi.string().trim().min(2).max(100).optional(),
@@ -210,107 +196,149 @@ const profileUpdateSchema = Joi.object({
     street: Joi.string().trim().max(200).allow('').optional(),
     city: Joi.string().trim().max(50).allow('').optional(),
     state: Joi.string().trim().max(50).allow('').optional(),
-    pincode: Joi.string().pattern(/^[1-9][0-9]{5}$/).allow('').optional(),
-    country: Joi.string().trim().default('India').optional()
+    pincode: Joi.string()
+      .pattern(/^[1-9][0-9]{5}$/)
+      .allow('')
+      .optional(),
+    country: Joi.string().trim().default('India').optional(),
   }).optional(),
   preferences: Joi.object({
     notifications: Joi.object({
       email: Joi.boolean().optional(),
       sms: Joi.boolean().optional(),
-      push: Joi.boolean().optional()
+      push: Joi.boolean().optional(),
     }).optional(),
     language: Joi.string().valid('en', 'hi').optional(),
-    timezone: Joi.string().default('Asia/Kolkata').optional()
+    timezone: Joi.string().default('Asia/Kolkata').optional(),
   }).optional(),
   creatorProfile: Joi.object({
     bio: Joi.string().max(500).allow('').optional(),
-    experienceLevel: Joi.string().valid('beginner', '1-2_years', '2-5_years', '5+_years').optional(),
-    contentCategories: Joi.array().items(
-      Joi.string().valid('lifestyle', 'fashion', 'beauty', 'tech', 'food', 'travel', 'fitness', 'comedy', 'education', 'business')
-    ).optional(),
-    languages: Joi.array().items(
-      Joi.string().valid('english', 'hindi', 'bengali', 'telugu', 'marathi', 'tamil', 'gujarati', 'kannada', 'malayalam', 'punjabi')
-    ).optional(),
+    experienceLevel: Joi.string()
+      .valid('beginner', '1-2_years', '2-5_years', '5+_years')
+      .optional(),
+    contentCategories: Joi.array()
+      .items(
+        Joi.string().valid(
+          'lifestyle',
+          'fashion',
+          'beauty',
+          'tech',
+          'food',
+          'travel',
+          'fitness',
+          'comedy',
+          'education',
+          'business'
+        )
+      )
+      .optional(),
+    languages: Joi.array()
+      .items(
+        Joi.string().valid(
+          'english',
+          'hindi',
+          'bengali',
+          'telugu',
+          'marathi',
+          'tamil',
+          'gujarati',
+          'kannada',
+          'malayalam',
+          'punjabi'
+        )
+      )
+      .optional(),
     socialProfiles: Joi.object({
       instagram: Joi.object({
         username: Joi.string().trim().lowercase().allow('').optional(),
         followersCount: Joi.number().min(0).optional(),
         avgLikes: Joi.number().min(0).optional(),
-        avgComments: Joi.number().min(0).optional()
+        avgComments: Joi.number().min(0).optional(),
       }).optional(),
       youtube: Joi.object({
         channelName: Joi.string().trim().allow('').optional(),
         subscribersCount: Joi.number().min(0).optional(),
-        avgViews: Joi.number().min(0).optional()
-      }).optional()
+        avgViews: Joi.number().min(0).optional(),
+      }).optional(),
     }).optional(),
     bankDetails: Joi.object({
       accountHolderName: Joi.string().trim().max(100).allow('').optional(),
-      accountNumber: Joi.string().pattern(/^\d{9,18}$/).allow('').optional(),
-      ifscCode: Joi.string().pattern(/^[A-Z]{4}0[A-Z0-9]{6}$/).uppercase().allow('').optional(),
-      bankName: Joi.string().trim().max(100).allow('').optional()
+      accountNumber: Joi.string()
+        .pattern(/^\d{9,18}$/)
+        .allow('')
+        .optional(),
+      ifscCode: Joi.string()
+        .pattern(/^[A-Z]{4}0[A-Z0-9]{6}$/)
+        .uppercase()
+        .allow('')
+        .optional(),
+      bankName: Joi.string().trim().max(100).allow('').optional(),
     }).optional(),
     upiDetails: Joi.object({
-      primaryUpi: Joi.string().pattern(/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$/).allow('').optional(),
-      secondaryUpi: Joi.string().pattern(/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$/).allow('').optional()
+      primaryUpi: Joi.string()
+        .pattern(/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$/)
+        .allow('')
+        .optional(),
+      secondaryUpi: Joi.string()
+        .pattern(/^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$/)
+        .allow('')
+        .optional(),
     }).optional(),
     gstDetails: Joi.object({
       hasGst: Joi.boolean().optional(),
-      gstNumber: Joi.string().pattern(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/).uppercase().allow('').optional(),
+      gstNumber: Joi.string()
+        .pattern(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/)
+        .uppercase()
+        .allow('')
+        .optional(),
       businessName: Joi.string().trim().max(200).allow('').optional(),
-      businessType: Joi.string().valid('individual', 'proprietorship', 'partnership', 'llp', 'pvt_ltd', 'public_ltd').optional()
+      businessType: Joi.string()
+        .valid('individual', 'proprietorship', 'partnership', 'llp', 'pvt_ltd', 'public_ltd')
+        .optional(),
     }).optional(),
     panDetails: Joi.object({
-      panNumber: Joi.string().pattern(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/).uppercase().allow('').optional(),
-      panName: Joi.string().uppercase().trim().max(100).allow('').optional()
-    }).optional()
-  }).optional()
-});
+      panNumber: Joi.string()
+        .pattern(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/)
+        .uppercase()
+        .allow('')
+        .optional(),
+      panName: Joi.string().uppercase().trim().max(100).allow('').optional(),
+    }).optional(),
+  }).optional(),
+})
 
 const managerInvitationSchema = Joi.object({
-  managerName: Joi.string()
-    .trim()
-    .min(2)
-    .max(100)
-    .required(),
-  managerEmail: Joi.string()
-    .email()
-    .lowercase()
-    .required(),
+  managerName: Joi.string().trim().min(2).max(100).required(),
+  managerEmail: Joi.string().email().lowercase().required(),
   managerPhone: Joi.string()
     .pattern(/^[6-9]\d{9}$/)
     .required(),
   relationship: Joi.string()
     .valid('professional_manager', 'friend', 'family', 'agency_employee')
     .default('professional_manager'),
-  revenueShare: Joi.number()
-    .min(0)
-    .max(50)
-    .default(0),
+  revenueShare: Joi.number().min(0).max(50).default(0),
   permissions: Joi.object({
     profile: Joi.object({
       editBasicInfo: Joi.boolean().optional(),
-      editSocialMedia: Joi.boolean().optional()
+      editSocialMedia: Joi.boolean().optional(),
     }).optional(),
     deals: Joi.object({
       createDeals: Joi.boolean().optional(),
       editDeals: Joi.boolean().optional(),
-      negotiateRates: Joi.boolean().optional()
+      negotiateRates: Joi.boolean().optional(),
     }).optional(),
     invoices: Joi.object({
       createInvoices: Joi.boolean().optional(),
-      sendInvoices: Joi.boolean().optional()
-    }).optional()
-  }).optional()
-});
+      sendInvoices: Joi.boolean().optional(),
+    }).optional(),
+  }).optional(),
+})
 
 const refreshTokenSchema = Joi.object({
-  refreshToken: Joi.string()
-    .required()
-    .messages({
-      'any.required': 'Refresh token is required'
-    })
-});
+  refreshToken: Joi.string().required().messages({
+    'any.required': 'Refresh token is required',
+  }),
+})
 
 // ============================================
 // AUTHENTICATION ROUTES
@@ -325,15 +353,13 @@ router.post(
   '/check-phone',
   validateRequest(phoneSchema),
   asyncHandler(async (req, res) => {
-    const { phone } = req.body;
+    const { phone } = req.body
 
-    const result = await authService.checkPhoneExists(phone);
+    const result = await authService.checkPhoneExists(phone)
 
-    res.status(200).json(
-      successResponse('Phone check completed', result)
-    );
+    res.status(200).json(successResponse('Phone check completed', result))
   })
-);
+)
 
 /**
  * @route   POST /api/v1/auth/send-otp
@@ -345,15 +371,13 @@ router.post(
   otpRateLimit,
   validateRequest(otpRequestSchema),
   asyncHandler(async (req, res) => {
-    const { phone, purpose } = req.body;
+    const { phone, purpose } = req.body
 
-    const result = await authService.generateOTP(phone, purpose);
+    const result = await authService.generateOTP(phone, purpose)
 
-    res.status(200).json(
-      successResponse('OTP sent successfully', result)
-    );
+    res.status(200).json(successResponse('OTP sent successfully', result))
   })
-);
+)
 
 /**
  * @route   POST /api/v1/auth/verify-otp
@@ -364,15 +388,13 @@ router.post(
   '/verify-otp',
   validateRequest(otpVerificationSchema),
   asyncHandler(async (req, res) => {
-    const { phone, otpCode, purpose } = req.body;
+    const { phone, otpCode, purpose } = req.body
 
-    const result = await authService.verifyOTP(phone, otpCode, purpose);
+    const result = await authService.verifyOTP(phone, otpCode, purpose)
 
-    res.status(200).json(
-      successResponse('OTP verified successfully', result)
-    );
+    res.status(200).json(successResponse('OTP verified successfully', result))
   })
-);
+)
 
 /**
  * @route   POST /api/v1/auth/register
@@ -384,13 +406,11 @@ router.post(
   registrationRateLimit,
   validateRequest(registrationSchema),
   asyncHandler(async (req, res) => {
-    const result = await authService.registerCreator(req.body);
+    const result = await authService.registerCreator(req.body)
 
-    res.status(201).json(
-      successResponse('Registration successful', result, 201)
-    );
+    res.status(201).json(successResponse('Registration successful', result, 201))
   })
-);
+)
 
 /**
  * @route   POST /api/v1/auth/login
@@ -402,15 +422,13 @@ router.post(
   loginRateLimit,
   validateRequest(loginSchema),
   asyncHandler(async (req, res) => {
-    const { identifier, password } = req.body;
+    const { identifier, password } = req.body
 
-    const result = await authService.loginWithPassword(identifier, password);
+    const result = await authService.loginWithPassword(identifier, password)
 
-    res.status(200).json(
-      successResponse('Login successful', result)
-    );
+    res.status(200).json(successResponse('Login successful', result))
   })
-);
+)
 
 /**
  * @route   POST /api/v1/auth/login-otp
@@ -422,15 +440,13 @@ router.post(
   loginRateLimit,
   validateRequest(otpLoginSchema),
   asyncHandler(async (req, res) => {
-    const { phone, otpCode } = req.body;
+    const { phone, otpCode } = req.body
 
-    const result = await authService.loginWithOTP(phone, otpCode);
+    const result = await authService.loginWithOTP(phone, otpCode)
 
-    res.status(200).json(
-      successResponse('Login successful', result)
-    );
+    res.status(200).json(successResponse('Login successful', result))
   })
-);
+)
 
 /**
  * @route   POST /api/v1/auth/reset-password
@@ -442,15 +458,13 @@ router.post(
   otpRateLimit,
   validateRequest(passwordResetSchema),
   asyncHandler(async (req, res) => {
-    const { phone, otpCode, newPassword } = req.body;
+    const { phone, otpCode, newPassword } = req.body
 
-    const result = await authService.resetPassword(phone, otpCode, newPassword);
+    const result = await authService.resetPassword(phone, otpCode, newPassword)
 
-    res.status(200).json(
-      successResponse('Password reset successful', result)
-    );
+    res.status(200).json(successResponse('Password reset successful', result))
   })
-);
+)
 
 /**
  * @route   POST /api/v1/auth/refresh
@@ -461,15 +475,13 @@ router.post(
   '/refresh',
   validateRequest(refreshTokenSchema),
   asyncHandler(async (req, res) => {
-    const { refreshToken } = req.body;
+    const { refreshToken } = req.body
 
-    const result = await authService.refreshTokens(refreshToken);
+    const result = await authService.refreshTokens(refreshToken)
 
-    res.status(200).json(
-      successResponse('Tokens refreshed successfully', result)
-    );
+    res.status(200).json(successResponse('Tokens refreshed successfully', result))
   })
-);
+)
 
 // ============================================
 // PROTECTED ROUTES (REQUIRE AUTHENTICATION)
@@ -484,13 +496,10 @@ router.get(
   '/profile',
   authenticateUser,
   asyncHandler(async (req, res) => {
-    const userProfile = await authService.getUserProfile(req.user.id);
-
-    res.status(200).json(
-      successResponse('Profile retrieved successfully', { user: userProfile })
-    );
+    const userProfile = await authService.getUserProfile(req.user.id)
+    res.status(200).json(successResponse('Profile retrieved successfully', { user: userProfile }))
   })
-);
+)
 
 /**
  * @route   PUT /api/v1/auth/profile
@@ -502,13 +511,11 @@ router.put(
   authenticateUser,
   validateRequest(profileUpdateSchema),
   asyncHandler(async (req, res) => {
-    const updatedProfile = await authService.updateUserProfile(req.user.id, req.body);
+    const updatedProfile = await authService.updateUserProfile(req.user.id, req.body)
 
-    res.status(200).json(
-      successResponse('Profile updated successfully', { user: updatedProfile })
-    );
+    res.status(200).json(successResponse('Profile updated successfully', { user: updatedProfile }))
   })
-);
+)
 
 /**
  * @route   POST /api/v1/auth/invite-manager
@@ -522,18 +529,14 @@ router.post(
   asyncHandler(async (req, res) => {
     // Check if user is a creator
     if (req.user.role !== 'creator') {
-      return res.status(403).json(
-        errorResponse('Only creators can invite managers', null, 403)
-      );
+      return res.status(403).json(errorResponse('Only creators can invite managers', null, 403))
     }
 
-    const result = await authService.inviteManager(req.user.id, req.body);
+    const result = await authService.inviteManager(req.user.id, req.body)
 
-    res.status(200).json(
-      successResponse('Manager invitation sent successfully', result)
-    );
+    res.status(200).json(successResponse('Manager invitation sent successfully', result))
   })
-);
+)
 
 /**
  * @route   POST /api/v1/auth/accept-manager-invitation
@@ -542,24 +545,23 @@ router.post(
  */
 router.post(
   '/accept-manager-invitation',
-  validateRequest(Joi.object({
-    invitationToken: Joi.string().optional(), // For future implementation
-    email: Joi.string().email().required(),
-    password: Joi.string().min(8).required(),
-    fullName: Joi.string().trim().min(2).max(100).required(),
-    phone: Joi.string().pattern(/^[6-9]\d{9}$/).required()
-  })),
+  validateRequest(
+    Joi.object({
+      invitationToken: Joi.string().optional(), // For future implementation
+      email: Joi.string().email().required(),
+      password: Joi.string().min(8).required(),
+      fullName: Joi.string().trim().min(2).max(100).required(),
+      phone: Joi.string()
+        .pattern(/^[6-9]\d{9}$/)
+        .required(),
+    })
+  ),
   asyncHandler(async (req, res) => {
-    const result = await authService.acceptManagerInvitation(
-      req.body.invitationToken,
-      req.body
-    );
+    const result = await authService.acceptManagerInvitation(req.body.invitationToken, req.body)
 
-    res.status(201).json(
-      successResponse('Manager invitation accepted successfully', result, 201)
-    );
+    res.status(201).json(successResponse('Manager invitation accepted successfully', result, 201))
   })
-);
+)
 
 /**
  * @route   POST /api/v1/auth/logout
@@ -570,15 +572,13 @@ router.post(
   '/logout',
   authenticateUser,
   asyncHandler(async (req, res) => {
-    const deviceId = req.body.deviceId || null;
-    
-    const result = await authService.logout(req.user.id, deviceId);
+    const deviceId = req.body.deviceId || null
 
-    res.status(200).json(
-      successResponse('Logged out successfully', result)
-    );
+    const result = await authService.logout(req.user.id, deviceId)
+
+    res.status(200).json(successResponse('Logged out successfully', result))
   })
-);
+)
 
 /**
  * @route   DELETE /api/v1/auth/account
@@ -590,23 +590,20 @@ router.delete(
   authenticateUser,
   asyncHandler(async (req, res) => {
     // Soft delete - mark account as inactive
-    await User.findByIdAndUpdate(
-      req.user.id,
-      { 
-        accountStatus: 'inactive',
-        deletedAt: new Date()
-      }
-    );
+    await User.findByIdAndUpdate(req.user.id, {
+      accountStatus: 'inactive',
+      deletedAt: new Date(),
+    })
 
-    log('info', 'User account deleted', { userId: req.user.id });
+    log('info', 'User account deleted', { userId: req.user.id })
 
     res.status(200).json(
       successResponse('Account deleted successfully', {
-        message: 'Your account has been deactivated. Contact support to reactivate.'
+        message: 'Your account has been deactivated. Contact support to reactivate.',
       })
-    );
+    )
   })
-);
+)
 
 // ============================================
 // UTILITY ROUTES
@@ -620,16 +617,16 @@ router.delete(
 router.get(
   '/subscription-tiers',
   asyncHandler(async (req, res) => {
-    const config = require('../../shared/config');
-    const subscriptionTiers = config.subscriptions.tiers;
+    const config = require('../../shared/config')
+    const subscriptionTiers = config.subscriptions.tiers
 
     res.status(200).json(
       successResponse('Subscription tiers retrieved successfully', {
-        tiers: subscriptionTiers
+        tiers: subscriptionTiers,
       })
-    );
+    )
   })
-);
+)
 
 /**
  * @route   GET /api/v1/auth/feature-access
@@ -640,8 +637,8 @@ router.get(
   '/feature-access',
   authenticateUser,
   asyncHandler(async (req, res) => {
-    const user = await User.findById(req.user.id);
-    const limits = User.getSubscriptionLimits(user.subscriptionTier);
+    const user = await User.findById(req.user.id)
+    const limits = User.getSubscriptionLimits(user.subscriptionTier)
 
     const featureAccess = {
       subscriptionTier: user.subscriptionTier,
@@ -655,15 +652,13 @@ router.get(
         aiContractReview: user.hasFeatureAccess('ai_contract_review'),
         advancedAnalytics: user.hasFeatureAccess('advanced_analytics'),
         multiCreatorDashboard: user.hasFeatureAccess('multi_creator_dashboard'),
-        apiAccess: user.hasFeatureAccess('api_access')
-      }
-    };
+        apiAccess: user.hasFeatureAccess('api_access'),
+      },
+    }
 
-    res.status(200).json(
-      successResponse('Feature access retrieved successfully', featureAccess)
-    );
+    res.status(200).json(successResponse('Feature access retrieved successfully', featureAccess))
   })
-);
+)
 
 /**
  * @route   GET /api/v1/auth/suggested-rates
@@ -674,15 +669,13 @@ router.get(
   '/suggested-rates',
   authenticateUser,
   asyncHandler(async (req, res) => {
-    const creatorProfile = await CreatorProfile.findOne({ userId: req.user.id });
-    
+    const creatorProfile = await CreatorProfile.findOne({ userId: req.user.id })
+
     if (!creatorProfile) {
-      return res.status(404).json(
-        errorResponse('Creator profile not found', null, 404)
-      );
+      return res.status(404).json(errorResponse('Creator profile not found', null, 404))
     }
 
-    const suggestedRates = creatorProfile.getSuggestedRates();
+    const suggestedRates = creatorProfile.getSuggestedRates()
 
     res.status(200).json(
       successResponse('Suggested rates calculated successfully', {
@@ -691,16 +684,16 @@ router.get(
         socialStats: {
           instagram: {
             followersCount: creatorProfile.socialProfiles.instagram.followersCount,
-            engagementRate: creatorProfile.calculateEngagementRate('instagram')
+            engagementRate: creatorProfile.calculateEngagementRate('instagram'),
           },
           youtube: {
-            subscribersCount: creatorProfile.socialProfiles.youtube.subscribersCount
-          }
-        }
+            subscribersCount: creatorProfile.socialProfiles.youtube.subscribersCount,
+          },
+        },
       })
-    );
+    )
   })
-);
+)
 
 // ============================================
 // DEVELOPMENT/DEBUG ROUTES (DEV ONLY)
@@ -715,18 +708,18 @@ if (process.env.NODE_ENV === 'development') {
   router.post(
     '/dev/generate-test-otp',
     asyncHandler(async (req, res) => {
-      const { phone } = req.body;
-      const testOtp = '123456'; // Fixed OTP for development
+      const { phone } = req.body
+      const testOtp = '123456' // Fixed OTP for development
 
       res.status(200).json(
         successResponse('Development OTP generated', {
           phone,
           otp: testOtp,
-          message: 'Use this OTP for testing in development environment'
+          message: 'Use this OTP for testing in development environment',
         })
-      );
+      )
     })
-  );
+  )
 
   /**
    * @route   GET /api/v1/auth/dev/user-stats
@@ -736,11 +729,11 @@ if (process.env.NODE_ENV === 'development') {
   router.get(
     '/dev/user-stats',
     asyncHandler(async (req, res) => {
-      const totalUsers = await User.countDocuments();
-      const activeUsers = await User.countDocuments({ accountStatus: 'active' });
-      const creatorProfiles = await CreatorProfile.countDocuments();
-      const trialUsers = await User.countDocuments({ subscriptionStatus: 'trial' });
-      const paidUsers = await User.countDocuments({ subscriptionStatus: 'active' });
+      const totalUsers = await User.countDocuments()
+      const activeUsers = await User.countDocuments({ accountStatus: 'active' })
+      const creatorProfiles = await CreatorProfile.countDocuments()
+      const trialUsers = await User.countDocuments({ subscriptionStatus: 'trial' })
+      const paidUsers = await User.countDocuments({ subscriptionStatus: 'active' })
 
       res.status(200).json(
         successResponse('User statistics', {
@@ -749,11 +742,11 @@ if (process.env.NODE_ENV === 'development') {
           creatorProfiles,
           trialUsers,
           paidUsers,
-          conversionRate: totalUsers > 0 ? Math.round((paidUsers / totalUsers) * 100) : 0
+          conversionRate: totalUsers > 0 ? Math.round((paidUsers / totalUsers) * 100) : 0,
         })
-      );
+      )
     })
-  );
+  )
 }
 
 // ============================================
@@ -761,9 +754,7 @@ if (process.env.NODE_ENV === 'development') {
 // ============================================
 
 router.use('*', (req, res) => {
-  res.status(404).json(
-    errorResponse(`Auth route ${req.originalUrl} not found`, null, 404)
-  );
-});
+  res.status(404).json(errorResponse(`Auth route ${req.originalUrl} not found`, null, 404))
+})
 
-module.exports = router;
+module.exports = router
